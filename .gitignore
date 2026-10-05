@@ -1,0 +1,46 @@
+# =========================
+# React / Vite
+# =========================
+research-paper-frontend/node_modules/
+research-paper-frontend/dist/
+
+# =========================
+# Spring Boot / Maven
+# =========================
+research-paper-assistant/target/
+research-paper-assistant/data/
+research-paper-assistant/uploads/
+
+# =========================
+# Python / FastAPI
+# =========================
+ai-service/.venv/
+ai-service/venv/
+ai-service/__pycache__/
+ai-service/*.pyc
+ai-service/data/
+
+# =========================
+# IDE
+# =========================
+.idea/
+.vscode/
+*.iml
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
