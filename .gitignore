@@ -16,7 +16,8 @@ research-paper-assistant/uploads/
 # =========================
 ai-service/.venv/
 ai-service/venv/
-ai-service/__pycache__/
+__pycache__/
+.pytest_cache/
 ai-service/*.pyc
 ai-service/data/
 

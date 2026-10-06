@@ -1,16 +1,8 @@
-import chromadb
-
+from errors import ServiceError
 from llm_service import ask_llm
-
-
-# =========================================================
-# CHROMA
-# =========================================================
-
-client = chromadb.PersistentClient(path="./data/chroma")
-
-collection = client.get_or_create_collection(
-    name="research_paper_chunks"
+from vector_store import (
+    get_paper_chunks,
+    select_representative_chunks
 )
 
 
@@ -22,126 +14,9 @@ collection = client.get_or_create_collection(
 # Each paper contributes a limited number of chunks.
 MAX_CHUNKS_PER_PAPER = 8
 
-
-# =========================================================
-# GET PAPER CHUNKS
-# =========================================================
-
-def get_paper_chunks(project_id: int, document_id: str):
-    results = collection.get(
-        where={
-            "$and": [
-                {
-                    "project_id": project_id
-                },
-                {
-                    "document_id": document_id
-                }
-            ]
-        },
-        include=[
-            "documents",
-            "metadatas"
-        ]
-    )
-
-    documents = results.get("documents") or []
-    metadatas = results.get("metadatas") or []
-
-    paper_name = "Research Paper"
-
-    if metadatas:
-        paper_name = metadatas[0].get(
-            "paper_name",
-            paper_name
-        )
-
-    return documents, paper_name
-
-
-# =========================================================
-# SELECT REPRESENTATIVE CHUNKS
-# =========================================================
-
-def select_representative_chunks(
-    chunks: list[str],
-    max_chunks: int = MAX_CHUNKS_PER_PAPER
-) -> list[str]:
-
-    if not chunks:
-        return []
-
-    # Small paper -> use everything
-    if len(chunks) <= max_chunks:
-        return chunks
-
-    selected = []
-
-    # -----------------------------------------------------
-    # First chunks
-    # Usually contain title / abstract / introduction
-    # -----------------------------------------------------
-
-    first_count = min(3, max_chunks)
-
-    selected.extend(
-        chunks[:first_count]
-    )
-
-    remaining_slots = (
-        max_chunks - len(selected)
-    )
-
-    if remaining_slots <= 0:
-        return selected
-
-    # -----------------------------------------------------
-    # Last chunk
-    # Often contains conclusion
-    # -----------------------------------------------------
-
-    if remaining_slots >= 1:
-
-        selected.append(
-            chunks[-1]
-        )
-
-        remaining_slots -= 1
-
-    if remaining_slots <= 0:
-        return selected
-
-    # -----------------------------------------------------
-    # Middle chunks
-    # Spread selection across the paper
-    # -----------------------------------------------------
-
-    middle_chunks = chunks[
-        first_count:-1
-    ]
-
-    if not middle_chunks:
-        return selected
-
-    step = max(
-        1,
-        len(middle_chunks) // remaining_slots
-    )
-
-    for i in range(
-        0,
-        len(middle_chunks),
-        step
-    ):
-
-        if len(selected) >= max_chunks:
-            break
-
-        selected.append(
-            middle_chunks[i]
-        )
-
-    return selected[:max_chunks]
+# First chunks usually contain title / abstract /
+# introduction.
+HEAD_CHUNKS_PER_PAPER = 3
 
 
 # =========================================================
@@ -167,29 +42,19 @@ def compare_papers(
 
     if not document_id_1 or not document_id_2:
 
-        return {
-            "scope": "TWO_PAPERS",
-            "project_id": project_id,
-            "document_id_1": document_id_1,
-            "document_id_2": document_id_2,
-            "comparison": (
-                "Please select two research papers "
-                "before comparing."
-            )
-        }
+        raise ServiceError(
+            400,
+            "Please select two research papers "
+            "before comparing."
+        )
 
     if document_id_1 == document_id_2:
 
-        return {
-            "scope": "TWO_PAPERS",
-            "project_id": project_id,
-            "document_id_1": document_id_1,
-            "document_id_2": document_id_2,
-            "comparison": (
-                "Please select two different "
-                "research papers."
-            )
-        }
+        raise ServiceError(
+            400,
+            "Please select two different "
+            "research papers."
+        )
 
     # -----------------------------------------------------
     # Get Paper 1
@@ -225,33 +90,19 @@ def compare_papers(
 
     if not chunks_1:
 
-        return {
-            "scope": "TWO_PAPERS",
-            "project_id": project_id,
-            "document_id_1": document_id_1,
-            "document_id_2": document_id_2,
-            "paper_name_1": paper_name_1,
-            "paper_name_2": paper_name_2,
-            "comparison": (
-                f"No processed content was found "
-                f"for '{paper_name_1}'."
-            )
-        }
+        raise ServiceError(
+            404,
+            f"No processed content was found "
+            f"for '{paper_name_1}'."
+        )
 
     if not chunks_2:
 
-        return {
-            "scope": "TWO_PAPERS",
-            "project_id": project_id,
-            "document_id_1": document_id_1,
-            "document_id_2": document_id_2,
-            "paper_name_1": paper_name_1,
-            "paper_name_2": paper_name_2,
-            "comparison": (
-                f"No processed content was found "
-                f"for '{paper_name_2}'."
-            )
-        }
+        raise ServiceError(
+            404,
+            f"No processed content was found "
+            f"for '{paper_name_2}'."
+        )
 
     # -----------------------------------------------------
     # Select representative chunks
@@ -259,13 +110,17 @@ def compare_papers(
 
     selected_chunks_1 = (
         select_representative_chunks(
-            chunks_1
+            chunks_1,
+            MAX_CHUNKS_PER_PAPER,
+            HEAD_CHUNKS_PER_PAPER
         )
     )
 
     selected_chunks_2 = (
         select_representative_chunks(
-            chunks_2
+            chunks_2,
+            MAX_CHUNKS_PER_PAPER,
+            HEAD_CHUNKS_PER_PAPER
         )
     )
 

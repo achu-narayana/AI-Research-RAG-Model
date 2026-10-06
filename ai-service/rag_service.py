@@ -178,7 +178,10 @@ def generate_answer(
     # 4. BUILD CONTEXT
     # =====================================================
 
-    context = "\n\n".join(chunks)
+    context = "\n\n".join(
+        f"[From: {chunk['paper_name']}]\n{chunk['text']}"
+        for chunk in chunks
+    )
 
 
     # =====================================================
@@ -282,13 +285,6 @@ IMPORTANT INSTRUCTIONS:
 
 19. Do not produce an answer longer than necessary unless
     the user asks for a detailed explanation.
-
-RESEARCH PAPER CONTEXT:
-==================================================
-
-{context}
-
-==================================================
 
 FINAL ANSWER:
 """

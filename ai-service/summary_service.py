@@ -1,18 +1,8 @@
-import chromadb
-
+from errors import ServiceError
 from llm_service import ask_llm
-
-
-# =========================================================
-# ChromaDB
-# =========================================================
-
-client = chromadb.PersistentClient(
-    path="./data/chroma"
-)
-
-collection = client.get_or_create_collection(
-    name="research_paper_chunks"
+from vector_store import (
+    get_paper_chunks,
+    select_representative_chunks
 )
 
 
@@ -25,132 +15,9 @@ collection = client.get_or_create_collection(
 # makes the whole summary use only ONE LLM call.
 MAX_CHUNKS_FOR_SUMMARY = 24
 
-
-# =========================================================
-# Get chunks for one paper
-# =========================================================
-
-def get_paper_chunks(
-        project_id: int,
-        document_id: str
-):
-
-    results = collection.get(
-        where={
-            "$and": [
-                {
-                    "project_id": project_id
-                },
-                {
-                    "document_id": document_id
-                }
-            ]
-        },
-        include=[
-            "documents",
-            "metadatas"
-        ]
-    )
-
-    documents = results.get("documents") or []
-    metadatas = results.get("metadatas") or []
-
-    paper_name = "Selected Research Paper"
-
-    if metadatas:
-
-        paper_name = metadatas[0].get(
-            "paper_name",
-            paper_name
-        )
-
-    return documents, paper_name
-
-
-# =========================================================
-# Select representative chunks
-# =========================================================
-
-def select_representative_chunks(
-        chunks: list[str],
-        max_chunks: int = MAX_CHUNKS_FOR_SUMMARY
-) -> list[str]:
-
-    if not chunks:
-        return []
-
-    # If the paper is already small, use everything.
-    if len(chunks) <= max_chunks:
-        return chunks
-
-    selected = []
-
-    # -----------------------------------------------------
-    # Always include the beginning of the paper
-    # because it usually contains title / abstract /
-    # introduction.
-    # -----------------------------------------------------
-
-    first_count = min(4, max_chunks)
-
-    selected.extend(
-        chunks[:first_count]
-    )
-
-    remaining_slots = max_chunks - len(selected)
-
-    if remaining_slots <= 0:
-        return selected
-
-    # -----------------------------------------------------
-    # Always include the final chunk because it may
-    # contain conclusion / final discussion.
-    # -----------------------------------------------------
-
-    if remaining_slots >= 1:
-
-        selected.append(
-            chunks[-1]
-        )
-
-        remaining_slots -= 1
-
-    # -----------------------------------------------------
-    # Take chunks evenly across the middle of the paper.
-    # This gives the LLM coverage of methodology,
-    # experiments, results, etc.
-    # -----------------------------------------------------
-
-    if remaining_slots <= 0:
-        return selected
-
-    middle_chunks = chunks[
-        first_count:-1
-    ]
-
-    if not middle_chunks:
-        return selected
-
-    step = max(
-        1,
-        len(middle_chunks) // remaining_slots
-    )
-
-    for i in range(
-        0,
-        len(middle_chunks),
-        step
-    ):
-
-        if len(selected) >= max_chunks:
-            break
-
-        selected.append(
-            middle_chunks[i]
-        )
-
-    # Make absolutely sure we do not exceed the limit.
-    return selected[:max_chunks]
+# The first chunks usually contain title / abstract /
+# introduction, so they are always included.
+HEAD_CHUNKS_FOR_SUMMARY = 4
 
 
 # =========================================================
@@ -174,16 +41,11 @@ def generate_summary(
 
     if not document_id:
 
-        return {
-            "scope": "ONE_PAPER",
-            "project_id": project_id,
-            "document_id": None,
-            "paper_name": None,
-            "summary": (
-                "Please select a research paper "
-                "before generating a summary."
-            )
-        }
+        raise ServiceError(
+            400,
+            "Please select a research paper "
+            "before generating a summary."
+        )
 
     # -----------------------------------------------------
     # Get paper chunks
@@ -191,7 +53,8 @@ def generate_summary(
 
     chunks, paper_name = get_paper_chunks(
         project_id,
-        document_id
+        document_id,
+        default_name="Selected Research Paper"
     )
 
     print(
@@ -201,23 +64,20 @@ def generate_summary(
 
     if not chunks:
 
-        return {
-            "scope": "ONE_PAPER",
-            "project_id": project_id,
-            "document_id": document_id,
-            "paper_name": paper_name,
-            "summary": (
-                "No processed content was found "
-                "for this research paper."
-            )
-        }
+        raise ServiceError(
+            404,
+            "No processed content was found "
+            "for this research paper."
+        )
 
     # -----------------------------------------------------
     # Select representative chunks
     # -----------------------------------------------------
 
     selected_chunks = select_representative_chunks(
-        chunks
+        chunks,
+        MAX_CHUNKS_FOR_SUMMARY,
+        HEAD_CHUNKS_FOR_SUMMARY
     )
 
     print(

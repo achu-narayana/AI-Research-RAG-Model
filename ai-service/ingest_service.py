@@ -1,39 +1,46 @@
-import chromadb
-import uuid
-
-from pdf_service import extract_text_from_pdf
 from chunk_service import split_text
 from embedding_service import create_embeddings
-
-
-client = chromadb.PersistentClient(path="./data/chroma")
-
-collection = client.get_or_create_collection(
-    name="research_paper_chunks"
-)
+from errors import ServiceError
+from pdf_service import extract_text_from_pdf
+from vector_store import collection, delete_document
 
 
 def ingest_pdf(file_path, document_id, project_id, paper_name):
 
-    text = extract_text_from_pdf(file_path)
+    try:
+        text = extract_text_from_pdf(file_path)
+    except Exception as e:
+        raise ServiceError(422, f"Could not read the PDF: {e}")
 
-    chunks = split_text(text)
+    chunks = split_text(text) if text.strip() else []
+
+    if not chunks:
+        raise ServiceError(
+            422,
+            "No text could be extracted from this PDF. "
+            "Scanned PDFs need Tesseract OCR installed."
+        )
 
     vectors = create_embeddings(chunks)
 
+    # Re-ingesting the same paper replaces its old chunks
+    # instead of duplicating them.
+    delete_document(project_id, document_id)
+
     ids = [
-        f"chunk_{uuid.uuid4()}"
-        for _ in chunks
+        f"{project_id}_{document_id}_{index}"
+        for index in range(len(chunks))
     ]
 
     metadatas = [
-    {
-        "document_id": document_id,
-        "project_id": project_id,
-        "paper_name": paper_name
-    }
-    for _ in chunks
-]
+        {
+            "document_id": document_id,
+            "project_id": project_id,
+            "paper_name": paper_name,
+            "chunk_index": index
+        }
+        for index in range(len(chunks))
+    ]
 
     collection.add(
         ids=ids,

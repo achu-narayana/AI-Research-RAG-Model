@@ -1,15 +1,5 @@
-import chromadb
-
 from embedding_service import create_embedding
-
-
-client = chromadb.PersistentClient(
-    path="./data/chroma"
-)
-
-collection = client.get_or_create_collection(
-    name="research_paper_chunks"
-)
+from vector_store import collection, paper_filter
 
 
 def search_similar_chunks(
@@ -17,34 +7,39 @@ def search_similar_chunks(
         top_k=6,
         document_id=None,
         project_id=None
-):
+) -> list[dict]:
+    """
+    Returns the top_k most similar chunks as
+    {"text": ..., "paper_name": ...} dicts.
+    """
+
+    if project_id is None:
+        raise ValueError("project_id is required")
+
+    # Specific PDF selected (still limited to the project)
+    if document_id is not None:
+        where = paper_filter(project_id, document_id)
+
+    # "All Papers" selected
+    else:
+        where = {"project_id": project_id}
 
     question_embedding = create_embedding(question)
 
-    query_args = {
-        "query_embeddings": [question_embedding],
-        "n_results": top_k
-    }
+    results = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=top_k,
+        where=where,
+        include=["documents", "metadatas"]
+    )
 
-    # Specific PDF selected
-    if document_id is not None:
-        query_args["where"] = {
-            "document_id": document_id
+    documents = (results.get("documents") or [[]])[0]
+    metadatas = (results.get("metadatas") or [[]])[0]
+
+    return [
+        {
+            "text": document,
+            "paper_name": (meta or {}).get("paper_name", "Research Paper")
         }
-
-    # "All Papers" selected
-    elif project_id is not None:
-        query_args["where"] = {
-            "project_id": project_id
-        }
-
-    else:
-        raise ValueError(
-            "Either document_id or project_id is required"
-        )
-
-    results = collection.query(**query_args)
-
-    documents = results.get("documents", [[]])[0]
-
-    return documents
+        for document, meta in zip(documents, metadatas)
+    ]
