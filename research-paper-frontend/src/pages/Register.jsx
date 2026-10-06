@@ -13,116 +13,445 @@ function Register() {
     const [loading, setLoading] = useState(false);
 
     const handleRegister = async (e) => {
+    e.preventDefault();
 
-        e.preventDefault();
+    setError("");
+    setLoading(true);
 
-        setError("");
-        setLoading(true);
+    try {
+        const response = await fetch(
+            "http://localhost:8081/api/auth/register",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    name,
+                    email,
+                    password,
+                }),
+            }
+        );
 
-        try {
+        // Read response safely
+        const rawResponse = await response.text();
 
-            const response = await fetch(
-                "http://localhost:8081/api/auth/register",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        name,
-                        email,
-                        password,
-                    }),
-                }
-            );
+        let data = {};
 
-            const data = await response.json();
+        if (rawResponse.trim()) {
+            try {
+                data = JSON.parse(rawResponse);
+            } catch {
+                data = {
+                    message: rawResponse,
+                };
+            }
+        }
 
-            if (!response.ok) {
+        if (!response.ok) {
+            if (response.status === 409) {
                 throw new Error(
-                    data.message || "Registration failed"
+                    "An account with this email already exists."
                 );
             }
 
-            // After successful registration
-            navigate("/");
+            if (response.status === 400) {
+                throw new Error(
+                    data.message ||
+                    "Please check your details and try again."
+                );
+            }
 
-        } catch (err) {
-
-            setError(err.message);
-
-        } finally {
-
-            setLoading(false);
+            throw new Error(
+                data.message ||
+                data.error ||
+                "Unable to create account. Please try again."
+            );
         }
-    };
 
+        navigate("/");
+
+    } catch (err) {
+        if (err instanceof TypeError) {
+            setError(
+                "Unable to connect to the server. Please try again."
+            );
+        } else {
+            setError(err.message || "Something went wrong. Please try again.");
+        }
+    } finally {
+        setLoading(false);
+    }
+};
     return (
-        <div className="auth-page">
+        <div className="auth-page register-page">
 
-            <div className="auth-card">
+            {/* ==================================================
+                BACKGROUND
+            ================================================== */}
 
-                <h1>Create Account</h1>
+            <div className="auth-background-grid"></div>
 
-                <p className="auth-subtitle">
-                    Start managing your research papers
-                </p>
+            <div className="auth-decoration auth-decoration-one"></div>
+            <div className="auth-decoration auth-decoration-two"></div>
+            <div className="auth-decoration auth-decoration-three"></div>
 
-                <form onSubmit={handleRegister}>
 
-                    <label>Name</label>
+            {/* ==================================================
+                MAIN LAYOUT
+            ================================================== */}
 
-                    <input
-                        type="text"
-                        placeholder="Enter your name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                    />
+            <div className="auth-layout">
 
-                    <label>Email</label>
 
-                    <input
-                        type="email"
-                        placeholder="Enter your email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
-                    />
+                {/* ==================================================
+                    LEFT SHOWCASE
+                ================================================== */}
 
-                    <label>Password</label>
+                <section className="auth-showcase">
 
-                    <input
-                        type="password"
-                        placeholder="Create a password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                    />
+                    <div className="auth-showcase-top">
 
-                    {error && (
-                        <p className="error-message">
-                            {error}
+                        <div className="auth-brand-mark">
+
+                            <span className="auth-brand-symbol">
+                                ✦
+                            </span>
+
+                            <span>
+                                Research AI
+                            </span>
+
+                        </div>
+
+
+                        <div className="auth-live-badge">
+
+                            <span className="auth-live-dot"></span>
+
+                            Build your workspace
+
+                        </div>
+
+                    </div>
+
+
+                    <div className="auth-showcase-main">
+
+                        <p className="auth-eyebrow">
+                            YOUR RESEARCH · YOUR WORKSPACE
                         </p>
-                    )}
 
-                    <button
-                        type="submit"
-                        disabled={loading}
-                    >
-                        {loading
-                            ? "Creating account..."
-                            : "Create Account"}
-                    </button>
 
-                </form>
+                        <h2>
+                            Start building
+                            <span> smarter research.</span>
+                        </h2>
 
-                <p className="auth-switch">
-                    Already have an account?{" "}
-                    <Link to="/">
-                        Sign In
-                    </Link>
-                </p>
+
+                        <p className="auth-showcase-description">
+                            Create your account and organize your
+                            research papers in one intelligent workspace
+                            designed for faster reading and analysis.
+                        </p>
+
+
+                        {/* ==================================================
+                            REGISTER BENEFITS
+                        ================================================== */}
+
+                        <div className="auth-feature-list">
+
+                            <div className="auth-feature-card">
+
+                                <div className="auth-feature-icon">
+                                    01
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Create projects
+                                    </strong>
+
+                                    <span>
+                                        Keep papers organized by
+                                        research project.
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+
+                            <div className="auth-feature-card">
+
+                                <div className="auth-feature-icon">
+                                    02
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Build your library
+                                    </strong>
+
+                                    <span>
+                                        Upload and manage multiple
+                                        research papers.
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+
+                            <div className="auth-feature-card">
+
+                                <div className="auth-feature-icon">
+                                    03
+                                </div>
+
+                                <div>
+
+                                    <strong>
+                                        Explore with AI
+                                    </strong>
+
+                                    <span>
+                                        Ask questions, summarize and
+                                        compare research.
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+
+                    <div className="auth-showcase-footer">
+
+                        <span>
+                            Research workspace
+                        </span>
+
+                        <span className="auth-footer-line"></span>
+
+                        <span>
+                            RAG-powered analysis
+                        </span>
+
+                    </div>
+
+                </section>
+
+
+                {/* ==================================================
+                    REGISTER CARD
+                ================================================== */}
+
+                <section className="auth-form-section">
+
+                    <div className="auth-card register-card">
+
+                        <div className="auth-card-accent"></div>
+
+
+                        {/* ==================================================
+                            HEADER
+                        ================================================== */}
+
+                        <div className="auth-card-header">
+
+                            <div className="auth-card-icon register-card-icon">
+                                +
+                            </div>
+
+                            <div>
+
+                                <p className="auth-card-kicker">
+                                    GET STARTED
+                                </p>
+
+                                <h1>
+                                    Create account
+                                </h1>
+
+                            </div>
+
+                        </div>
+
+
+                        <p className="auth-subtitle">
+                            Set up your research workspace in a few seconds.
+                        </p>
+
+
+                        {/* ==================================================
+                            FORM
+                        ================================================== */}
+
+                        <form onSubmit={handleRegister}>
+
+
+                            {/* NAME */}
+
+                            <div className="auth-field">
+
+                                <label htmlFor="register-name">
+                                    Name
+                                </label>
+
+                                <input
+                                    id="register-name"
+                                    type="text"
+                                    placeholder="Enter your name"
+                                    value={name}
+                                    onChange={(e) =>
+                                        setName(e.target.value)
+                                    }
+                                    required
+                                    autoComplete="name"
+                                />
+
+                            </div>
+
+
+                            {/* EMAIL */}
+
+                            <div className="auth-field">
+
+                                <label htmlFor="register-email">
+                                    Email
+                                </label>
+
+                                <input
+                                    id="register-email"
+                                    type="email"
+                                    placeholder="Enter your email"
+                                    value={email}
+                                    onChange={(e) =>
+                                        setEmail(e.target.value)
+                                    }
+                                    required
+                                    autoComplete="email"
+                                />
+
+                            </div>
+
+
+                            {/* PASSWORD */}
+
+                            <div className="auth-field">
+
+                                <label htmlFor="register-password">
+                                    Password
+                                </label>
+
+                                <input
+                                    id="register-password"
+                                    type="password"
+                                    placeholder="Create a password"
+                                    value={password}
+                                    onChange={(e) =>
+                                        setPassword(e.target.value)
+                                    }
+                                    required
+                                    autoComplete="new-password"
+                                />
+
+                            </div>
+
+
+                            {/* ERROR */}
+
+                            {error && (
+                                <p className="error-message">
+                                    {error}
+                                </p>
+                            )}
+
+
+                            {/* SUBMIT */}
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="auth-submit-button"
+                            >
+
+                                <span>
+                                    {loading
+                                        ? "Creating account..."
+                                        : "Create Account"
+                                    }
+                                </span>
+
+
+                                {!loading && (
+                                    <span className="auth-submit-arrow">
+                                        →
+                                    </span>
+                                )}
+
+                            </button>
+
+                        </form>
+
+
+                        {/* ==================================================
+                            DIVIDER
+                        ================================================== */}
+
+                        <div className="auth-divider">
+
+                            <span></span>
+
+                            <small>OR</small>
+
+                            <span></span>
+
+                        </div>
+
+
+                        {/* ==================================================
+                            SIGN IN
+                        ================================================== */}
+
+                        <p className="auth-switch">
+
+                            Already have an account?
+
+                            <Link to="/">
+                                Sign In
+                            </Link>
+
+                        </p>
+
+
+                        {/* ==================================================
+                            SECURITY NOTE
+                        ================================================== */}
+
+                        <div className="auth-security-note">
+
+                            <span className="auth-security-icon">
+                                ✓
+                            </span>
+
+                            <span>
+                                Your account is securely authenticated
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                </section>
 
             </div>
 

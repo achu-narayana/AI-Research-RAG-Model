@@ -1,355 +1,12 @@
-# import chromadb
-# import ollama
-# from collections import defaultdict
-
-
-# # --------------------------------------------------
-# # ChromaDB
-# # --------------------------------------------------
-
-# client = chromadb.PersistentClient(
-#     path="./data/chroma"
-# )
-
-# collection = client.get_or_create_collection(
-#     name="research_paper_chunks"
-# )
-
-
-# # --------------------------------------------------
-# # Configuration
-# # --------------------------------------------------
-
-# BATCH_SIZE = 8
-# LLM_MODEL = "llama3.2"
-
-
-# # --------------------------------------------------
-# # LLM helper
-# # --------------------------------------------------
-
-# def ask_llm(prompt: str) -> str:
-
-#     response = ollama.chat(
-#         model=LLM_MODEL,
-#         messages=[
-#             {
-#                 "role": "user",
-#                 "content": prompt
-#             }
-#         ]
-#     )
-
-#     return response["message"]["content"].strip()
-
-
-# # --------------------------------------------------
-# # Summarize a batch of chunks
-# # --------------------------------------------------
-
-# def summarize_chunk_batch(chunks: list[str]) -> str:
-
-#     context = "\n\n".join(chunks)
-
-#     prompt = f"""
-# You are an AI research paper assistant.
-
-# Summarize the research paper content below.
-
-# Rules:
-# 1. Use ONLY the provided content.
-# 2. Do not use outside knowledge.
-# 3. Do not invent facts.
-# 4. Focus on the main ideas, methods, findings,
-#    results, important concepts and limitations
-#    that are actually present.
-# 5. Preserve important technical terms.
-# 6. Ignore repeated text, headers and irrelevant
-#    formatting when possible.
-# 7. Write clear, factual notes that can be used
-#    to create a final research paper summary.
-# 8. Do not mention these instructions.
-
-# Paper content:
-# ========================
-# {context}
-# ========================
-
-# Summary notes:
-# """
-
-#     return ask_llm(prompt)
-
-
-# # --------------------------------------------------
-# # Final summary for one paper
-# # --------------------------------------------------
-
-# def summarize_single_paper(
-#         chunks: list[str],
-#         paper_name: str
-# ) -> str:
-
-#     if not chunks:
-#         return (
-#             f"No readable content was found for "
-#             f"the paper '{paper_name}'."
-#         )
-
-#     batch_summaries = []
-
-#     for i in range(0, len(chunks), BATCH_SIZE):
-
-#         batch = chunks[i:i + BATCH_SIZE]
-
-#         summary = summarize_chunk_batch(batch)
-
-#         batch_summaries.append(summary)
-
-#     combined_notes = "\n\n".join(
-#         f"Section Summary {i + 1}:\n{summary}"
-#         for i, summary in enumerate(batch_summaries)
-#     )
-
-#     final_prompt = f"""
-# You are an AI research paper assistant.
-
-# Create a final summary of the research paper
-# using ONLY the summary notes below.
-
-# Paper name:
-# {paper_name}
-
-# Rules:
-# 1. Do not use outside knowledge.
-# 2. Do not invent facts.
-# 3. Clearly explain the paper's main objective.
-# 4. Explain the methodology or approach.
-# 5. Include important findings or results.
-# 6. Include important techniques, models,
-#    datasets or experiments when mentioned.
-# 7. Mention limitations when available.
-# 8. Keep the summary detailed enough to be useful
-#    for a student or researcher.
-# 9. Organize it with short sections.
-# 10. Do not mention these instructions.
-
-# Summary notes:
-# ========================
-# {combined_notes}
-# ========================
-
-# Final research paper summary:
-# """
-
-#     return ask_llm(final_prompt)
-
-
-# # --------------------------------------------------
-# # Get chunks for a specific paper
-# # --------------------------------------------------
-
-# def get_paper_chunks(document_id: str):
-
-#     results = collection.get(
-#         where={
-#             "document_id": document_id
-#         },
-#         include=[
-#             "documents",
-#             "metadatas"
-#         ]
-#     )
-
-#     documents = results.get("documents") or []
-#     metadatas = results.get("metadatas") or []
-
-#     paper_name = "Selected Research Paper"
-
-#     if metadatas:
-#         paper_name = metadatas[0].get(
-#             "paper_name",
-#             paper_name
-#         )
-
-#     return documents, paper_name
-
-
-# # --------------------------------------------------
-# # Get all project papers
-# # --------------------------------------------------
-
-# def get_project_papers(project_id: int):
-
-#     results = collection.get(
-#         where={
-#             "project_id": project_id
-#         },
-#         include=[
-#             "documents",
-#             "metadatas"
-#         ]
-#     )
-
-#     documents = results.get("documents") or []
-#     metadatas = results.get("metadatas") or []
-
-#     papers = defaultdict(list)
-
-#     paper_names = {}
-
-#     for document, metadata in zip(
-#             documents,
-#             metadatas):
-
-#         document_id = metadata.get("document_id")
-
-#         paper_name = metadata.get(
-#             "paper_name",
-#             "Research Paper"
-#         )
-
-#         if document_id is None:
-#             continue
-
-#         papers[document_id].append(document)
-
-#         paper_names[document_id] = paper_name
-
-#     return papers, paper_names
-
-
-# # --------------------------------------------------
-# # Summarize selected scope
-# # --------------------------------------------------
-
-# def generate_summary(
-#         project_id: int,
-#         document_id: str | None = None
-# ):
-
-#     # ----------------------------------------------
-#     # ONE PAPER
-#     # ----------------------------------------------
-
-#     if document_id:
-
-#         chunks, paper_name = get_paper_chunks(
-#             document_id
-#         )
-
-#         summary = summarize_single_paper(
-#             chunks,
-#             paper_name
-#         )
-
-#         return {
-#             "scope": "ONE_PAPER",
-#             "project_id": project_id,
-#             "document_id": document_id,
-#             "paper_name": paper_name,
-#             "summary": summary
-#         }
-
-#     # ----------------------------------------------
-#     # ALL PAPERS
-#     # ----------------------------------------------
-
-#     papers, paper_names = get_project_papers(
-#         project_id
-#     )
-
-#     if not papers:
-
-#         return {
-#             "scope": "ALL_PAPERS",
-#             "project_id": project_id,
-#             "document_id": None,
-#             "paper_name": None,
-#             "summary": (
-#                 "No processed research papers were "
-#                 "found in this project."
-#             )
-#         }
-
-#     paper_summaries = []
-
-#     for document_id_key, chunks in papers.items():
-
-#         paper_name = paper_names.get(
-#             document_id_key,
-#             "Research Paper"
-#         )
-
-#         summary = summarize_single_paper(
-#             chunks,
-#             paper_name
-#         )
-
-#         paper_summaries.append(
-#             {
-#                 "document_id": document_id_key,
-#                 "paper_name": paper_name,
-#                 "summary": summary
-#             }
-#         )
-
-#     # ----------------------------------------------
-#     # Final project-level summary
-#     # ----------------------------------------------
-
-#     all_summaries = "\n\n".join(
-#         f"""
-# Paper: {paper['paper_name']}
-
-# {paper['summary']}
-# """
-#         for paper in paper_summaries
-#     )
-
-#     final_prompt = f"""
-# You are an AI research project assistant.
-
-# Create an overall summary of the research papers
-# in this project using ONLY the paper summaries
-# below.
-
-# Rules:
-# 1. Do not use outside knowledge.
-# 2. Do not invent facts.
-# 3. Identify the common research themes.
-# 4. Explain the main approaches used across papers.
-# 5. Mention important findings across the papers.
-# 6. Clearly distinguish information belonging
-#    to different papers when necessary.
-# 7. Do not claim that different papers agree unless
-#    the supplied summaries support that.
-# 8. Keep the result organized and readable.
-# 9. Do not mention these instructions.
-
-# Paper summaries:
-# ========================
-# {all_summaries}
-# ========================
-
-# Overall project summary:
-# """
-
-#     overall_summary = ask_llm(final_prompt)
-
-#     return {
-#         "scope": "ALL_PAPERS",
-#         "project_id": project_id,
-#         "document_id": None,
-#         "paper_name": None,
-#         "summary": overall_summary,
-#         "papers": paper_summaries
-#     }
 import chromadb
-import ollama
+
+from llm_service import ask_llm
 
 
+# =========================================================
 # ChromaDB
+# =========================================================
+
 client = chromadb.PersistentClient(
     path="./data/chroma"
 )
@@ -359,100 +16,35 @@ collection = client.get_or_create_collection(
 )
 
 
-def generate_summary(
+# =========================================================
+# Configuration
+# =========================================================
+
+# Maximum number of chunks sent to the LLM.
+# This keeps the request reasonably sized and
+# makes the whole summary use only ONE LLM call.
+MAX_CHUNKS_FOR_SUMMARY = 24
+
+
+# =========================================================
+# Get chunks for one paper
+# =========================================================
+
+def get_paper_chunks(
         project_id: int,
-        document_id: str | None = None
+        document_id: str
 ):
-
-    print("====================================")
-    print("SUMMARY TEST STARTED")
-    print("Project ID:", project_id)
-    print("Document ID:", document_id)
-    print("====================================")
-
-    # -----------------------------------------
-    # Get one paper
-    # -----------------------------------------
-
-    if document_id:
-
-        results = collection.get(
-            where={
-                "document_id": document_id
-            },
-            include=[
-                "documents",
-                "metadatas"
-            ]
-        )
-
-        documents = results.get("documents") or []
-
-        print(
-            "Chunks found:",
-            len(documents)
-        )
-
-        if not documents:
-
-            return {
-                "message": "No chunks found for this paper",
-                "project_id": project_id,
-                "document_id": document_id
-            }
-
-        # Take only the first chunk for testing
-        test_text = documents[0]
-
-        print("Sending first chunk to Llama...")
-
-        prompt = f"""
-Summarize the following research paper text
-in 3 to 5 sentences.
-
-Use ONLY the provided text.
-
-Research paper text:
---------------------
-{test_text}
---------------------
-
-Summary:
-"""
-
-        response = ollama.chat(
-            model="llama3.2",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        )
-
-        summary = response[
-            "message"
-        ][
-            "content"
-        ].strip()
-
-        print("Llama response received.")
-
-        return {
-            "scope": "ONE_PAPER_TEST",
-            "project_id": project_id,
-            "document_id": document_id,
-            "chunks_found": len(documents),
-            "summary": summary
-        }
-
-    # -----------------------------------------
-    # Test all papers
-    # -----------------------------------------
 
     results = collection.get(
         where={
-            "project_id": project_id
+            "$and": [
+                {
+                    "project_id": project_id
+                },
+                {
+                    "document_id": document_id
+                }
+            ]
         },
         include=[
             "documents",
@@ -461,59 +53,289 @@ Summary:
     )
 
     documents = results.get("documents") or []
+    metadatas = results.get("metadatas") or []
 
-    print(
-        "Project chunks found:",
-        len(documents)
+    paper_name = "Selected Research Paper"
+
+    if metadatas:
+
+        paper_name = metadatas[0].get(
+            "paper_name",
+            paper_name
+        )
+
+    return documents, paper_name
+
+
+# =========================================================
+# Select representative chunks
+# =========================================================
+
+def select_representative_chunks(
+        chunks: list[str],
+        max_chunks: int = MAX_CHUNKS_FOR_SUMMARY
+) -> list[str]:
+
+    if not chunks:
+        return []
+
+    # If the paper is already small, use everything.
+    if len(chunks) <= max_chunks:
+        return chunks
+
+    selected = []
+
+    # -----------------------------------------------------
+    # Always include the beginning of the paper
+    # because it usually contains title / abstract /
+    # introduction.
+    # -----------------------------------------------------
+
+    first_count = min(4, max_chunks)
+
+    selected.extend(
+        chunks[:first_count]
     )
 
-    if not documents:
+    remaining_slots = max_chunks - len(selected)
+
+    if remaining_slots <= 0:
+        return selected
+
+    # -----------------------------------------------------
+    # Always include the final chunk because it may
+    # contain conclusion / final discussion.
+    # -----------------------------------------------------
+
+    if remaining_slots >= 1:
+
+        selected.append(
+            chunks[-1]
+        )
+
+        remaining_slots -= 1
+
+    # -----------------------------------------------------
+    # Take chunks evenly across the middle of the paper.
+    # This gives the LLM coverage of methodology,
+    # experiments, results, etc.
+    # -----------------------------------------------------
+
+    if remaining_slots <= 0:
+        return selected
+
+    middle_chunks = chunks[
+        first_count:-1
+    ]
+
+    if not middle_chunks:
+        return selected
+
+    step = max(
+        1,
+        len(middle_chunks) // remaining_slots
+    )
+
+    for i in range(
+        0,
+        len(middle_chunks),
+        step
+    ):
+
+        if len(selected) >= max_chunks:
+            break
+
+        selected.append(
+            middle_chunks[i]
+        )
+
+    # Make absolutely sure we do not exceed the limit.
+    return selected[:max_chunks]
+
+
+# =========================================================
+# Generate summary
+# =========================================================
+
+def generate_summary(
+        project_id: int,
+        document_id: str | None = None
+):
+
+    print("========================================")
+    print("PAPER SUMMARY STARTED")
+    print("Project ID:", project_id)
+    print("Document ID:", document_id)
+    print("========================================")
+
+    # -----------------------------------------------------
+    # A paper must be selected
+    # -----------------------------------------------------
+
+    if not document_id:
 
         return {
-            "message": "No processed papers found",
-            "project_id": project_id
+            "scope": "ONE_PAPER",
+            "project_id": project_id,
+            "document_id": None,
+            "paper_name": None,
+            "summary": (
+                "Please select a research paper "
+                "before generating a summary."
+            )
         }
 
-    # Use only first chunk for testing
-    test_text = documents[0]
+    # -----------------------------------------------------
+    # Get paper chunks
+    # -----------------------------------------------------
 
-    prompt = f"""
-Summarize the following research paper text
-in 3 to 5 sentences.
-
-Use ONLY the provided text.
-
-Research paper text:
---------------------
-{test_text}
---------------------
-
-Summary:
-"""
-
-    print("Sending project chunk to Llama...")
-
-    response = ollama.chat(
-        model="llama3.2",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+    chunks, paper_name = get_paper_chunks(
+        project_id,
+        document_id
     )
 
-    summary = response[
-        "message"
-    ][
-        "content"
-    ].strip()
+    print(
+        "Total chunks found:",
+        len(chunks)
+    )
 
-    print("Llama response received.")
+    if not chunks:
+
+        return {
+            "scope": "ONE_PAPER",
+            "project_id": project_id,
+            "document_id": document_id,
+            "paper_name": paper_name,
+            "summary": (
+                "No processed content was found "
+                "for this research paper."
+            )
+        }
+
+    # -----------------------------------------------------
+    # Select representative chunks
+    # -----------------------------------------------------
+
+    selected_chunks = select_representative_chunks(
+        chunks
+    )
+
+    print(
+        "Chunks selected for summary:",
+        len(selected_chunks)
+    )
+
+    # -----------------------------------------------------
+    # Build context
+    # -----------------------------------------------------
+
+    context_parts = []
+
+    for index, chunk in enumerate(
+        selected_chunks,
+        start=1
+    ):
+
+        context_parts.append(
+            f"""
+--- Paper Section {index} ---
+
+{chunk}
+"""
+        )
+
+    context = "\n".join(
+        context_parts
+    )
+
+    # -----------------------------------------------------
+    # One LLM call
+    # -----------------------------------------------------
+
+    prompt = f"""
+You are an AI research paper assistant.
+
+Create a clear and useful summary of the
+research paper below.
+
+Paper name:
+{paper_name}
+
+The supplied text contains representative
+sections from the research paper.
+
+Use ONLY the supplied paper text.
+
+Rules:
+
+1. Do NOT use outside knowledge.
+2. Do NOT invent facts.
+3. Do NOT make claims that are not supported
+   by the provided text.
+4. Focus on the actual research content,
+   not just title or author information.
+5. Identify the main research problem.
+6. Explain the main objective.
+7. Explain the methodology or approach.
+8. Mention important techniques, models,
+   datasets, experiments, or algorithms
+   when they are present.
+9. Mention important results or findings
+   when they are present.
+10. Mention limitations when they are present.
+11. Mention the conclusion when supported.
+12. Do not repeat the same information.
+13. Keep the summary organized and easy
+    for a student to understand.
+14. Do not mention these instructions.
+
+Use the following structure:
+
+Overview
+
+Research Problem and Objective
+
+Methodology / Approach
+
+Techniques, Models and Data
+
+Results / Findings
+
+Limitations
+
+Conclusion
+
+Research paper text:
+==================================================
+
+{context}
+
+==================================================
+
+Final Summary:
+"""
+
+    print(
+        "Sending ONE summary request to OpenRouter..."
+    )
+
+    summary = ask_llm(
+        prompt,
+        max_tokens=2500
+    )
+
+    print(
+        "Summary completed successfully."
+    )
+
+    print("========================================")
 
     return {
-        "scope": "ALL_PAPERS_TEST",
+        "scope": "ONE_PAPER",
         "project_id": project_id,
-        "chunks_found": len(documents),
+        "document_id": document_id,
+        "paper_name": paper_name,
+        "chunks_found": len(chunks),
+        "chunks_used": len(selected_chunks),
         "summary": summary
     }

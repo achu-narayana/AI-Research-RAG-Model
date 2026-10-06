@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
-
+from compare_service import compare_papers
 from rag_service import generate_answer
 from ingest_service import ingest_pdf
 from summary_service import generate_summary
@@ -55,6 +55,40 @@ def summarize_papers(request: SummaryRequest):
     )
 
     return result
+@app.post("/api/ai/compare")
+def compare_two_papers(request: dict):
+
+    project_id = request.get("project_id")
+    document_id_1 = request.get("document_id_1")
+    document_id_2 = request.get("document_id_2")
+
+    print("========================================")
+    print("COMPARE REQUEST RECEIVED")
+    print("Project ID:", project_id)
+    print("Paper 1:", document_id_1)
+    print("Paper 2:", document_id_2)
+    print("========================================")
+
+    if project_id is None:
+        return {
+            "scope": "TWO_PAPERS",
+            "comparison": "Project ID is required."
+        }
+
+    if not document_id_1 or not document_id_2:
+        return {
+            "scope": "TWO_PAPERS",
+            "project_id": project_id,
+            "comparison": (
+                "Two research papers are required."
+            )
+        }
+
+    return compare_papers(
+        int(project_id),
+        document_id_1,
+        document_id_2
+    )
 
 
 @app.post("/api/ai/ingest")

@@ -1,190 +1,250 @@
 # AI Research Paper Assistant
 
-An AI-powered research workspace for uploading research papers, managing
-projects, and asking questions about uploaded papers using
-Retrieval-Augmented Generation (RAG).
+An AI-powered research workspace for uploading research papers, organizing them into projects, and interacting with them using Retrieval-Augmented Generation (RAG).
+
+The application combines a React frontend, Spring Boot backend, and Python FastAPI AI service.
 
 ## Project Architecture
 
-``` text
-React Frontend
-      |
-      v
-Spring Boot Backend
-      |
-      +---- H2 Database
-      |
-      v
-FastAPI AI Service
-      |
-      +---- PDF Text Extraction / OCR
-      +---- Text Chunking
-      +---- HuggingFace Embeddings
-      +---- ChromaDB
-      +---- Ollama + Llama 3.2
+```text
+                    +-----------------------+
+                    |     React Frontend    |
+                    |       Vite + JS       |
+                    +-----------+-----------+
+                                | HTTP
+                                v
+                    +-----------------------+
+                    |   Spring Boot Backend |
+                    | Java 17 + Spring Boot |
+                    |   JWT + Spring Data   |
+                    +----+-------------+----+
+                         |             |
+                         |             +-------------> H2 Database
+                         |
+                         | HTTP
+                         v
+                    +-----------------------+
+                    |   FastAPI AI Service  |
+                    |       Python          |
+                    +-----------+-----------+
+                                |
+                +---------------+---------------+
+                |               |               |
+                v               v               v
+          PDF / OCR       RAG Retrieval        LLM
+          PyMuPDF         ChromaDB +           OpenRouter
+          Tesseract       HuggingFace          openrouter/free
+                          Embeddings
 ```
 
-The application is divided into three parts:
+## Repository Structure
 
-``` text
-research-paper-assistant/
-├── frontend/       # React + Vite
-├── backend/        # Spring Boot + Java
-├── ai-service/     # FastAPI + Python RAG service
-└── README.md
+```text
+research-paper-assistant-ALL/
+├── ai-service/
+│   ├── main.py
+│   ├── rag\\\_service.py
+│   ├── retrieval\\\_service.py
+│   ├── summary\\\_service.py
+│   ├── compare\\\_service.py
+│   ├── llm\\\_service.py
+│   └── requirements.txt
+│
+├── research-paper-assistant/
+│   └── Spring Boot backend
+│
+├── research-paper-frontend/
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
+│
+├── .gitignore
+├── README.md
+└── ...
 ```
 
-> Folder names can be adjusted to match the repository structure.
+\---
 
-------------------------------------------------------------------------
+# Main Features
 
-# What Has Been Implemented
+## 1\. User Authentication
 
-## 1. User Authentication
+The Spring Boot backend provides:
 
-The Spring Boot backend currently provides:
+* User registration
+* User login
+* BCrypt password hashing
+* JWT-based authentication
+* Stateless Spring Security
+* Protected API endpoints
+* Project access based on the authenticated user
 
--   User registration
--   User login
--   Password hashing using BCrypt
--   JWT-based authentication
--   Stateless Spring Security configuration
--   Protected API endpoints
--   Authentication using the logged-in user's email
+The frontend stores the JWT token in local storage and uses it for protected requests.
 
-The frontend stores the JWT token and sends it with protected API
-requests.
+The Login and Register pages also provide simple frontend-friendly error messages for common failures such as invalid credentials, duplicate accounts, invalid requests, and server connection problems.
 
-------------------------------------------------------------------------
+\---
 
-## 2. Research Projects
+## 2\. Research Project Management
 
 Users can:
 
--   Create research projects
--   Provide a project title
--   Provide a project description
--   View their projects
--   Open an individual project
--   Access project-specific papers and AI chat
+* Create research projects
+* Add a project title
+* Add a project description
+* View their projects
+* Open a project
+* Access project-specific papers
+* Access project-specific AI chat
 
-Projects are associated with their owner, so users cannot access another
-user's project.
+Projects are associated with their owner, preventing users from accessing another user's project through the protected backend APIs.
 
-------------------------------------------------------------------------
+\---
 
-## 3. Research Paper Upload
+## 3\. Research Paper Upload
 
-The application supports uploading PDF research papers to a project.
+Research papers are uploaded as PDFs and associated with a project.
 
 Implemented functionality includes:
 
--   Single PDF upload
--   Multiple PDF upload
--   Uploading up to 5 papers in one request
--   Project ownership validation
--   PDF validation
--   Unique document IDs
--   Original filename storage
--   Paper metadata storage
--   Paper status tracking
--   Sending uploaded PDFs from Spring Boot to the FastAPI AI service
+* Single PDF upload
+* Multiple PDF upload
+* Up to 5 papers in one upload request
+* PDF validation
+* Project ownership validation
+* Unique document IDs
+* Original filename storage
+* Paper metadata storage
+* Paper status tracking
+* Sending uploaded PDFs from Spring Boot to the FastAPI AI service
 
-The frontend supports selecting multiple PDFs before clicking the upload
-button.
+The frontend also supports selecting multiple PDFs before starting the upload.
 
-------------------------------------------------------------------------
+\---
 
-## 4. PDF Processing and OCR
+## 4\. PDF Text Extraction and OCR
 
 The FastAPI service processes uploaded PDFs.
 
-Current processing includes:
+Processing includes:
 
--   PDF text extraction using PyMuPDF
--   OCR using Tesseract when required
--   Text cleaning
--   Text chunking using LangChain's RecursiveCharacterTextSplitter
+* PDF text extraction using PyMuPDF
+* OCR using Tesseract when readable text is not sufficient
+* Text cleaning
+* Text chunking using LangChain's `RecursiveCharacterTextSplitter`
 
-### Tesseract
+### Tesseract OCR
 
-Tesseract OCR is required on the machine because it is an external
-system dependency and is not installed through `requirements.txt`.
+Tesseract is an external system dependency and must be installed separately.
 
-On Windows, the expected installation is:
+For Windows, the expected installation is:
 
-``` text
-C:\Program Files\Tesseract-OCR\
+```text
+C:\\\\Program Files\\\\Tesseract-OCR\\\\
 ```
 
-The `tesseract.exe` executable and English trained data should be
-available.
+Required files include:
 
-------------------------------------------------------------------------
+```text
+C:\\\\Program Files\\\\Tesseract-OCR\\\\tesseract.exe
+C:\\\\Program Files\\\\Tesseract-OCR\\\\tessdata\\\\eng.traineddata
+```
 
-## 5. Embeddings and Vector Storage
+If necessary, add these Windows environment variables:
+
+### PATH
+
+```text
+C:\\\\Program Files\\\\Tesseract-OCR
+```
+
+### TESSDATA\_PREFIX
+
+```text
+C:\\\\Program Files\\\\Tesseract-OCR\\\\tessdata
+```
+
+After changing environment variables, restart PowerShell, VS Code, or STS.
+
+Verify:
+
+```powershell
+tesseract --version
+tesseract --list-langs
+```
+
+`eng` should be listed.
+
+\---
+
+# 5\. Embeddings and ChromaDB
 
 The AI service uses:
 
--   HuggingFace sentence-transformer embeddings
--   `all-MiniLM-L6-v2`
--   384-dimensional embeddings
--   ChromaDB for vector storage
+* HuggingFace Sentence Transformers
+* `all-MiniLM-L6-v2`
+* 384-dimensional embeddings
+* ChromaDB persistent vector storage
 
-Paper chunks are stored with metadata such as:
+Research paper chunks are stored with metadata such as:
 
-``` text
-document_id
-project_id
-paper_name
+```text
+document\\\_id
+project\\\_id
+paper\\\_name
 ```
 
-This metadata allows the system to retrieve information either from:
+This metadata allows retrieval to be limited to:
 
--   All papers belonging to a project
--   One specifically selected paper
+* All papers in the selected project
+* One specific paper
 
-Generated Chroma/vector data is local runtime data and should not be
-committed to Git.
+The local ChromaDB data is runtime data and should not be committed to Git.
 
-------------------------------------------------------------------------
+\---
 
-## 6. RAG-Based AI Chat
+# 6\. RAG-Based AI Chat
 
-The core AI feature is Retrieval-Augmented Generation.
+The main AI feature is Retrieval-Augmented Generation.
 
-Users can ask questions about their research papers.
+Users can ask questions about their uploaded research papers.
 
-Two modes are supported:
+Two chat scopes are supported.
 
 ### Project-wide chat
 
-The question searches across all papers uploaded to the selected
-project.
+The question searches across the papers in the selected research project.
 
 ### Selected-paper chat
 
 The question searches only the selected research paper.
 
-The flow is:
+### RAG Flow
 
-``` text
+```text
 User Question
       |
       v
-Spring Boot
+React Frontend
+      |
+      v
+Spring Boot Backend
       |
       v
 FastAPI AI Service
       |
       v
-ChromaDB Retrieval
+Query Embedding
+      |
+      v
+ChromaDB Similarity Search
       |
       v
 Relevant Paper Chunks
       |
       v
-Ollama + Llama 3.2
+OpenRouter LLM
+(openrouter/free)
       |
       v
 Generated Answer
@@ -193,526 +253,542 @@ Generated Answer
 Spring Boot
       |
       v
-React
+React UI
 ```
 
-The AI service is designed to answer using the retrieved research-paper
-context rather than general unrelated knowledge.
+The RAG prompt is designed to keep research-related answers grounded in the retrieved paper context and to avoid inventing unsupported information.
 
-------------------------------------------------------------------------
+Simple conversational messages such as greetings and acknowledgements are handled separately rather than forcing them through paper retrieval.
 
-## 7. Persistent Project Chat
+\---
 
-Each project has a persistent chat.
+# 7\. AI Paper Summarization
+
+The application can generate a structured summary for a selected research paper.
+
+The summary process:
+
+```text
+Selected Paper
+      |
+      v
+ChromaDB
+      |
+      v
+Representative Paper Chunks
+      |
+      v
+OpenRouter LLM
+      |
+      v
+Structured Summary
+```
+
+The generated summary focuses on information such as:
+
+* Overview
+* Research problem and objective
+* Methodology / approach
+* Techniques, models and data
+* Results / findings
+* Limitations
+* Conclusion
+
+The summary service uses a limited set of representative chunks to reduce prompt size and avoid unnecessary repeated LLM requests.
+
+\---
+
+# 8\. Research Paper Comparison
+
+The application supports comparing two different research papers.
+
+The user selects two papers from the current project.
+
+The comparison process:
+
+```text
+Paper 1 -------+
+               +----> ChromaDB / Paper Content
+Paper 2 -------+
+                         |
+                         v
+                 Representative Chunks
+                         |
+                         v
+                   OpenRouter LLM
+                         |
+                         v
+                   Paper Comparison
+```
+
+The comparison covers, when available in the supplied paper content:
+
+* Overall comparison
+* Similarities
+* Research problem and objectives
+* Methodology / approach
+* Techniques, models and data
+* Results / findings
+* Key differences
+* Limitations
+* Final comparison
+
+Only the selected two papers are used for the comparison.
+
+\---
+
+# 9\. Persistent Project Chat
+
+Each research project has one persistent chat.
 
 The Spring Boot backend stores:
 
--   User messages
--   Assistant responses
--   Selected document ID when applicable
--   Message creation time
+* User messages
+* Assistant responses
+* Selected document ID when applicable
+* Message creation time
 
-Chat history can be retrieved when the user opens the project again.
+The chat history can be loaded again when the project is reopened.
 
-------------------------------------------------------------------------
+\---
 
-## 8. Chat PDF Export
+# 10\. Chat PDF Export
 
-The backend includes an endpoint for exporting the project chat as a
-PDF.
+The application provides an endpoint for exporting a project's chat conversation as a PDF.
 
-The exported document contains the project's chat conversation in a
-readable PDF format.
+The exported document contains the chat history in a readable format.
 
-------------------------------------------------------------------------
+\---
 
 # Technology Stack
 
 ## Frontend
 
--   React
--   Vite
--   JavaScript
--   Axios
--   React Router
--   Lucide React
+* React
+* Vite
+* JavaScript
+* Axios
+* React Router
+* Lucide React
+* React Markdown
+* Remark GFM
+* CSS
+
+The frontend includes responsive UI styling combining neumorphism and neo-brutalist visual elements.
 
 ## Backend
 
--   Java 17
--   Spring Boot 4.1.1
--   Spring Security
--   JWT
--   Spring Data JPA
--   Hibernate
--   H2 Database
--   Maven
+* Java 17
+* Spring Boot 4.1.1
+* Spring Security
+* JWT
+* Spring Data JPA
+* Hibernate
+* H2 Database
+* Maven
+* Java HTTP Client
 
 ## AI Service
 
--   Python
--   FastAPI
--   Uvicorn
--   PyMuPDF
--   Tesseract OCR
--   LangChain
--   HuggingFace Sentence Transformers
--   ChromaDB
--   Ollama
--   Llama 3.2
+* Python
+* FastAPI
+* Uvicorn
+* PyMuPDF
+* Tesseract OCR
+* LangChain
+* HuggingFace Sentence Transformers
+* ChromaDB
+* OpenRouter
+* `openrouter/free`
 
-------------------------------------------------------------------------
+\---
 
-# Requirements Before Running the Project
+# Requirements
 
-A new developer/team member should install the following before running
-the application.
+Before running the project, install the following:
 
-## 1. Git
+* Git
+* Node.js and npm
+* Java 17
+* Python
+* Tesseract OCR
 
-Install Git:
+An OpenRouter API key is also required for the current LLM integration.
 
-``` text
-Git
+\---
+
+# Setup
+
+## 1\. Clone the Repository
+
+```powershell
+git clone https://github.com/achu-narayana/AI-Research-RAG-Model.git
+cd AI-Research-RAG-Model
 ```
 
-Verify:
+Make sure your working directory contains:
 
-``` powershell
-git --version
+```text
+ai-service/
+research-paper-assistant/
+research-paper-frontend/
 ```
 
-------------------------------------------------------------------------
+\---
 
-## 2. Node.js and npm
+# 2\. Frontend Setup
 
-Required for the React frontend.
+Go to the React frontend:
 
-Verify:
-
-``` powershell
-node --version
-npm --version
-```
-
-After cloning the repository:
-
-``` powershell
-cd frontend
+```powershell
+cd research-paper-frontend
 npm install
 ```
 
-Then run:
+Run:
 
-``` powershell
+```powershell
 npm run dev
 ```
 
 Frontend:
 
-``` text
+```text
 http://localhost:5173
 ```
 
-------------------------------------------------------------------------
+\---
 
-## 3. Java 17
+# 3\. Backend Setup
 
-Java 17 is required for the Spring Boot backend.
+Open another terminal and go to:
 
-Verify:
-
-``` powershell
-java --version
+```powershell
+cd research-paper-assistant
 ```
 
-The project currently uses Java 17.
+The project includes Maven Wrapper files, so Maven does not necessarily need to be installed globally.
 
-------------------------------------------------------------------------
+On Windows:
 
-## 4. Maven
-
-The Spring Boot project uses Maven.
-
-The project includes Maven Wrapper files (`mvnw` and `mvnw.cmd`), so
-Maven does not necessarily need to be installed globally.
-
-From the backend directory on Windows:
-
-``` powershell
-.\mvnw.cmd spring-boot:run
+```powershell
+.\\\\mvnw.cmd spring-boot:run
 ```
 
 Backend:
 
-``` text
+```text
 http://localhost:8081
 ```
 
-------------------------------------------------------------------------
+\---
 
-## 5. Python
+# 4\. AI Service Setup
 
-Python is required for the FastAPI AI service.
+Open another terminal:
 
-Verify:
-
-``` powershell
-python --version
+```powershell
+cd ai-service
 ```
 
-A Python virtual environment should be created inside `ai-service`:
+Create a virtual environment:
 
-``` powershell
-cd ai-service
+```powershell
 python -m venv .venv
 ```
 
-Activate it on Windows PowerShell:
+Activate it:
 
-``` powershell
-.\.venv\Scripts\activate
+```powershell
+.\\\\.venv\\\\Scripts\\\\activate
 ```
 
-Install dependencies:
+Install Python dependencies:
 
-``` powershell
+```powershell
 pip install -r requirements.txt
 ```
 
-Run FastAPI:
+\---
 
-``` powershell
+# 5\. OpenRouter Configuration
+
+The current AI service uses OpenRouter for LLM generation.
+
+Create a file:
+
+```text
+ai-service/.env
+```
+
+Add your API key:
+
+```env
+OPENROUTER\\\_API\\\_KEY=your\\\_openrouter\\\_api\\\_key
+```
+
+Do not commit this file.
+
+The model router currently used by the service is:
+
+```text
+openrouter/free
+```
+
+The `.env` file and API keys are excluded by `.gitignore`.
+
+\---
+
+# 6\. Run FastAPI
+
+With the Python virtual environment activated:
+
+```powershell
 uvicorn main:app --reload
 ```
 
 AI service:
 
-``` text
+```text
 http://127.0.0.1:8000
 ```
 
-------------------------------------------------------------------------
-
-## 6. Tesseract OCR
-
-Tesseract must be installed separately because it is not a Python
-package.
-
-On Windows, install Tesseract OCR and make sure it is available at:
-
-``` text
-C:\Program Files\Tesseract-OCR\
-```
-
-The system should have:
-
-``` text
-C:\Program Files\Tesseract-OCR\tesseract.exe
-C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata
-```
-
-Add the following to the Windows environment variables if necessary:
-
-### PATH
-
-``` text
-C:\Program Files\Tesseract-OCR
-```
-
-### TESSDATA_PREFIX
-
-``` text
-C:\Program Files\Tesseract-OCR\tessdata
-```
-
-After changing environment variables, restart PowerShell/VS Code/STS.
-
-Verify:
-
-``` powershell
-tesseract --version
-```
-
-And:
-
-``` powershell
-tesseract --list-langs
-```
-
-`eng` should be listed.
-
-------------------------------------------------------------------------
-
-## 7. Ollama
-
-Ollama is required for the local Llama model.
-
-Install Ollama before running the AI chat.
-
-Verify:
-
-``` powershell
-ollama --version
-```
-
-Pull the model used by the project:
-
-``` powershell
-ollama pull llama3.2
-```
-
-Verify the model:
-
-``` powershell
-ollama list
-```
-
-Ollama should be running before asking AI questions.
-
-The AI service communicates with the local Ollama service.
-
-------------------------------------------------------------------------
-
-# Running the Complete Application
-
-Open three terminals.
-
-## Terminal 1 --- AI Service
-
-``` powershell
-cd ai-service
-.\.venv\Scripts\activate
-uvicorn main:app --reload
-```
-
-------------------------------------------------------------------------
-
-## Terminal 2 --- Spring Boot Backend
-
-``` powershell
-cd backend
-.\mvnw.cmd spring-boot:run
-```
-
-Backend runs on:
-
-``` text
-http://localhost:8081
-```
-
-------------------------------------------------------------------------
-
-## Terminal 3 --- React Frontend
-
-``` powershell
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend runs on:
-
-``` text
-http://localhost:5173
-```
-
-------------------------------------------------------------------------
+\---
 
 # Recommended Startup Order
 
-For normal development:
+For normal local development:
 
-``` text
-1. Start Ollama
-       ↓
-2. Start FastAPI AI service
-       ↓
-3. Start Spring Boot backend
-       ↓
-4. Start React frontend
+```text
+1. Start FastAPI AI service
+          |
+          v
+2. Start Spring Boot backend
+          |
+          v
+3. Start React frontend
 ```
 
-------------------------------------------------------------------------
+Tesseract must already be installed and configured on the machine.
 
-# Local Data
+\---
 
-The following are local/generated files and should not be committed to
-Git:
+# Application Ports
 
-``` text
-frontend/node_modules/
-frontend/dist/
+|Component|Port|
+|-|-:|
+|React / Vite|`5173`|
+|Spring Boot|`8081`|
+|FastAPI|`8000`|
 
-backend/target/
-backend/data/
-backend/uploads/
+Spring Boot communicates with the AI service through:
 
-ai-service/.venv/
-ai-service/__pycache__/
-ai-service/data/
-```
-
-The H2 database, uploaded PDFs, ChromaDB data, Python cache files, and
-build files can be recreated locally.
-
-Do not commit personal PDFs, uploaded research papers, resumes, or other
-private documents.
-
-------------------------------------------------------------------------
-
-# Important Development Notes
-
-## Backend
-
-Spring Boot:
-
-``` text
-Port: 8081
-```
-
-H2 database is configured for local development.
-
-## AI Service
-
-FastAPI:
-
-``` text
-Port: 8000
-```
-
-The Spring Boot backend communicates with:
-
-``` text
+```text
 http://127.0.0.1:8000
 ```
 
-## Frontend
+The React frontend communicates with Spring Boot on:
 
-React/Vite:
-
-``` text
-Port: 5173
+```text
+http://localhost:8081
 ```
 
-The frontend communicates with the Spring Boot backend on port `8081`.
+\---
 
-------------------------------------------------------------------------
+# Main API Areas
 
-# Current Main API Areas
+## Authentication
 
-Authentication:
-
-``` text
-/api/auth/**
+```text
+/api/auth/\\\*\\\*
 ```
 
-Projects:
+## Projects
 
-``` text
+```text
 /api/projects
 ```
 
-Papers:
+## Papers
 
-``` text
+```text
 /api/projects/{projectId}/papers
 /api/projects/multiple
 ```
 
-Chat:
+## Chat
 
-``` text
+```text
 /api/projects/{projectId}/chat/messages
 /api/projects/{projectId}/chat/pdf
 ```
 
-The AI service provides endpoints for paper ingestion and question
-answering.
+## AI
 
-------------------------------------------------------------------------
-
-# Team Development
-
-The repository should contain all three components:
-
-``` text
-frontend/
-backend/
-ai-service/
+```text
+/api/ai/ask
+/api/ai/summary
+/api/ai/compare
 ```
 
-Each developer should create their own Git branch rather than directly
-working on `main`.
+The FastAPI service also exposes endpoints for PDF ingestion and AI processing.
+
+\---
+
+# Local Runtime Data
+
+The following files/directories are local or generated data and should not be committed:
+
+```text
+research-paper-frontend/node\\\_modules/
+research-paper-frontend/dist/
+
+research-paper-assistant/target/
+research-paper-assistant/data/
+research-paper-assistant/uploads/
+
+ai-service/.venv/
+ai-service/\\\_\\\_pycache\\\_\\\_/
+ai-service/data/
+```
+
+This includes:
+
+* H2 database files
+* Uploaded PDFs
+* ChromaDB vector data
+* Python cache files
+* Node modules
+* Build output
+
+Do not commit:
+
+* API keys
+* Passwords
+* `.env` files
+* Personal documents
+* Private research papers
+* Resumes or other confidential files
+
+\---
+
+# Current Project Status
+
+The current implementation includes:
+
+* User registration and login
+* BCrypt password hashing
+* JWT authentication
+* Protected backend APIs
+* Research project creation
+* Project listing
+* Project ownership validation
+* Single PDF upload
+* Multiple PDF upload
+* PDF validation
+* PDF text extraction
+* OCR support
+* Text cleaning
+* Text chunking
+* HuggingFace embeddings
+* ChromaDB vector storage
+* Project-wide RAG questions
+* Selected-paper RAG questions
+* Persistent project chat
+* Chat history
+* Chat PDF export
+* AI paper summarization
+* Two-paper comparison
+* OpenRouter LLM integration
+* Responsive React frontend
+* Research-focused UI redesign
+
+\---
+
+# Notes for Team Development
+
+The repository contains three cooperating applications:
+
+```text
+React Frontend
+      |
+      v
+Spring Boot Backend
+      |
+      v
+FastAPI AI Service
+```
+
+The Spring Boot application is responsible for application-level functionality such as:
+
+* Users
+* Authentication
+* Projects
+* Paper metadata
+* Access control
+* Chat persistence
+
+The Python service is responsible for AI/RAG-related processing such as:
+
+* PDF extraction
+* OCR
+* Chunking
+* Embeddings
+* ChromaDB retrieval
+* Question answering
+* Summarization
+* Paper comparison
+* LLM calls
+
+For team work, use feature branches rather than directly committing experimental changes to `main`.
 
 Example:
 
-``` powershell
+```powershell
 git checkout -b your-name-feature
 ```
 
 Before starting work:
 
-``` powershell
+```powershell
 git pull
 ```
 
 After making changes:
 
-``` powershell
+```powershell
 git add .
 git commit -m "Describe your changes"
 git push -u origin your-name-feature
 ```
 
-------------------------------------------------------------------------
+\---
 
-# Important: What Git Should NOT Contain
+# Important Git Reminder
 
-Do not commit:
+Never commit:
 
-``` text
-node_modules
-target
-.venv
-__pycache__
-H2 database files
-ChromaDB files
-uploaded PDFs
-personal documents
+```text
+.env
+.env.\\\*
 API keys
 passwords
-.env files
+node\\\_modules/
+target/
+.venv/
+\\\_\\\_pycache\\\_\\\_/
+database files
+uploaded PDFs
+ChromaDB data
 ```
 
-These should be excluded using `.gitignore`.
+The repository `.gitignore` is configured to exclude these files.
 
-------------------------------------------------------------------------
+\---
 
-# Project Status
+# Project Goal
 
-The current implementation includes:
+The goal of the project is to provide students and researchers with a single workspace where they can upload research papers, search them using RAG, ask questions, generate summaries, and compare papers without manually reading every document from start to finish.
 
--   User registration/login
--   JWT authentication
--   Research project creation
--   Project listing
--   Project-specific access control
--   Single PDF upload
--   Multiple PDF upload
--   PDF text extraction
--   OCR support
--   Text chunking
--   Embedding generation
--   ChromaDB vector storage
--   Project-wide RAG questions
--   Selected-paper RAG questions
--   Persistent project chat
--   Chat history
--   Chat PDF export
--   React frontend
--   Spring Boot backend
--   FastAPI AI service
 
-Further UI/UX improvements and additional AI features can be added as
-development continues.
+

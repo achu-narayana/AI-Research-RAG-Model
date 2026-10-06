@@ -1,13 +1,13 @@
 package com.researchassistant.chat.service;
 
 import com.researchassistant.ai.service.AiService;
+import com.researchassistant.chat.dto.ChatMessageRequest;
 import com.researchassistant.chat.entity.ChatMessage;
 import com.researchassistant.chat.entity.ProjectChat;
 import com.researchassistant.chat.repository.ChatMessageRepository;
 import com.researchassistant.chat.repository.ProjectChatRepository;
 import com.researchassistant.project.entity.Project;
 import com.researchassistant.project.repository.ProjectRepository;
-import com.researchassistant.chat.dto.ChatMessageRequest;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +35,10 @@ public class ChatService {
         this.aiService = aiService;
     }
 
+    // ==================================================
+    // VALIDATE PROJECT ACCESS
+    // ==================================================
+
     private Project validateProject(
             Long projectId,
             String email) {
@@ -44,12 +48,17 @@ public class ChatService {
                         new RuntimeException("Project not found"));
 
         if (!project.getOwner().getEmail().equals(email)) {
+
             throw new RuntimeException(
                     "You are not authorized to access this project");
         }
 
         return project;
     }
+
+    // ==================================================
+    // GET OR CREATE PROJECT CHAT
+    // ==================================================
 
     private ProjectChat getOrCreateChat(Project project) {
 
@@ -66,6 +75,10 @@ public class ChatService {
                 });
     }
 
+    // ==================================================
+    // NORMAL CHAT MESSAGE
+    // ==================================================
+
     @Transactional
     public ChatMessage sendMessage(
             Long projectId,
@@ -78,9 +91,13 @@ public class ChatService {
         ProjectChat chat =
                 getOrCreateChat(project);
 
-        String documentId = request.getDocumentId();
+        String documentId =
+                request.getDocumentId();
 
-        // Save user message first
+        // ----------------------------------------------
+        // Save user message
+        // ----------------------------------------------
+
         ChatMessage userMessage =
                 new ChatMessage(
                         chat,
@@ -92,7 +109,10 @@ public class ChatService {
 
         chatMessageRepository.save(userMessage);
 
-        // Existing working RAG service
+        // ----------------------------------------------
+        // Ask AI
+        // ----------------------------------------------
+
         String answer =
                 aiService.askQuestion(
                         request.getMessage(),
@@ -101,7 +121,10 @@ public class ChatService {
                         email
                 );
 
+        // ----------------------------------------------
         // Save AI response
+        // ----------------------------------------------
+
         ChatMessage assistantMessage =
                 new ChatMessage(
                         chat,
@@ -115,6 +138,83 @@ public class ChatService {
                 assistantMessage
         );
     }
+
+    // ==================================================
+    // SAVE SUMMARY TO CHAT HISTORY
+    // ==================================================
+
+    @Transactional
+    public ChatMessage saveSummaryMessage(
+            Long projectId,
+            String documentId,
+            String summary,
+            String email) {
+
+        Project project =
+                validateProject(projectId, email);
+
+        ProjectChat chat =
+                getOrCreateChat(project);
+
+        ChatMessage summaryMessage =
+                new ChatMessage(
+                        chat,
+                        "ASSISTANT",
+                        summary,
+                        documentId,
+                        LocalDateTime.now()
+                );
+
+        return chatMessageRepository.save(
+                summaryMessage
+        );
+    }
+
+    // ==================================================
+    // SAVE COMPARISON TO CHAT HISTORY
+    // ==================================================
+
+    @Transactional
+    public ChatMessage saveComparisonMessage(
+            Long projectId,
+            String documentId1,
+            String documentId2,
+            String comparison,
+            String email) {
+
+        // Validate project access
+        Project project =
+                validateProject(projectId, email);
+
+        // Get existing chat or create one
+        ProjectChat chat =
+                getOrCreateChat(project);
+
+        /*
+         * A comparison belongs to TWO papers.
+         *
+         * ChatMessage currently has only one documentId,
+         * so we intentionally save null here instead of
+         * pretending the comparison belongs to one paper.
+         */
+
+        ChatMessage comparisonMessage =
+                new ChatMessage(
+                        chat,
+                        "ASSISTANT",
+                        comparison,
+                        null,
+                        LocalDateTime.now()
+                );
+
+        return chatMessageRepository.save(
+                comparisonMessage
+        );
+    }
+
+    // ==================================================
+    // GET CHAT HISTORY
+    // ==================================================
 
     public List<ChatMessage> getChatHistory(
             Long projectId,
