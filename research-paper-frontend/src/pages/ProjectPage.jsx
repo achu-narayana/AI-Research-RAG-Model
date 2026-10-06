@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import {
+    apiFetch,
+    clearSession,
+    downloadChatPdf,
+    isAbortError,
+} from "../api";
 
 function ProjectPage() {
 
@@ -9,119 +15,64 @@ function ProjectPage() {
     const [project, setProject] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [pdfError, setPdfError] = useState("");
+    const [downloadingPdf, setDownloadingPdf] = useState(false);
 
     useEffect(() => {
 
+        // State is reset on project change because App.jsx
+        // remounts this page with key={projectId}.
+        const controller = new AbortController();
+
         const fetchProject = async () => {
-
-            const token = localStorage.getItem("token");
-
-            if (!token) {
-                navigate("/");
-                return;
-            }
 
             try {
 
-                // We already have GET /api/projects,
-                // so find the selected project from the user's projects.
-                const response = await fetch(
-                    "http://localhost:8081/api/projects",
-                    {
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                        },
-                    }
+                const data = await apiFetch(
+                    `/api/projects/${projectId}`,
+                    { signal: controller.signal }
                 );
 
-                if (response.status === 401 ||
-                    response.status === 403) {
-
-                    localStorage.removeItem("token");
-                    navigate("/");
-                    return;
-                }
-
-                if (!response.ok) {
-                    throw new Error("Failed to load project");
-                }
-
-                const projects = await response.json();
-
-                const selectedProject = projects.find(
-                    (item) =>
-                        String(item.id) === String(projectId)
-                );
-
-                if (!selectedProject) {
+                if (!data) {
                     throw new Error("Project not found");
                 }
 
-                setProject(selectedProject);
+                setProject(data);
+                setLoading(false);
 
             } catch (err) {
 
-                setError(err.message);
+                if (isAbortError(err)) {
+                    return;
+                }
 
-            } finally {
-
+                setError(err.message || "Failed to load project");
                 setLoading(false);
             }
         };
 
         fetchProject();
 
-    }, [projectId, navigate]);
+        return () => controller.abort();
+
+    }, [projectId]);
 
     const handleDownloadChatPdf = async () => {
-    const token = localStorage.getItem("token");
 
-    if (!token) {
-        navigate("/");
-        return;
-    }
+        setPdfError("");
+        setDownloadingPdf(true);
 
-    try {
-        const response = await fetch(
-            `http://localhost:8081/api/projects/${projectId}/chat/pdf`,
-            {
-                method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            }
-        );
-
-        if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem("token");
-            navigate("/");
-            return;
+        try {
+            await downloadChatPdf(projectId, project?.title);
+        } catch (err) {
+            setPdfError(err.message || "Failed to download chat PDF");
+        } finally {
+            setDownloadingPdf(false);
         }
+    };
 
-        if (!response.ok) {
-            throw new Error("Failed to download chat PDF");
-        }
-
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "research-project-chat.pdf";
-
-        document.body.appendChild(link);
-        link.click();
-
-        link.remove();
-        window.URL.revokeObjectURL(url);
-
-    } catch (error) {
-        alert(error.message);
-    }
-};
     const handleLogout = () => {
-        localStorage.removeItem("token");
+        clearSession();
         navigate("/");
     };
 
@@ -288,9 +239,16 @@ function ProjectPage() {
                         <button
     className="workspace-button"
     onClick={handleDownloadChatPdf}
+    disabled={downloadingPdf}
 >
-    Download Chat PDF
+    {downloadingPdf ? "Downloading..." : "Download Chat PDF"}
 </button>
+
+                        {pdfError && (
+                            <p className="error-message" role="alert">
+                                {pdfError}
+                            </p>
+                        )}
 
                     </div>
 

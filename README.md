@@ -457,6 +457,8 @@ Frontend:
 http://localhost:5173
 ```
 
+The backend address defaults to `http://localhost:8081`. To change it, copy `.env.example` to `.env` and set `VITE_API_URL`.
+
 \---
 
 # 3\. Backend Setup
@@ -480,6 +482,18 @@ Backend:
 ```text
 http://localhost:8081
 ```
+
+Optional environment variables:
+
+| Variable | Default | Purpose |
+|-|-|-|
+| `JWT_SECRET` | *(random per start)* | JWT signing key, at least 32 characters. If unset, a random key is generated and users must log in again after every restart. Set it for any shared deployment. |
+| `AI_SERVICE_URL` | `http://127.0.0.1:8000` | FastAPI AI service address |
+| `AI_SERVICE_TOKEN` | *(empty)* | Shared secret sent to the AI service; must match the AI service's `AI_SERVICE_TOKEN` |
+
+Other settings (timeouts, upload folder, CORS origins) are in `src/main/resources/application.properties` under `app.*`.
+
+Every error response has the form `{"message": "..."}`. 401 means the login is missing or expired; 502/503/504 mean the AI service failed, is not running, or timed out.
 
 \---
 
@@ -521,21 +535,41 @@ Create a file:
 ai-service/.env
 ```
 
-Add your API key:
+Copy `ai-service/.env.example` to `ai-service/.env` and add your API key:
 
 ```env
-OPENROUTER\\\_API\\\_KEY=your\\\_openrouter\\\_api\\\_key
+OPENROUTER_API_KEY=your_openrouter_api_key
 ```
 
-Do not commit this file.
+Do not commit this file. The `.env` file and API keys are excluded by `.gitignore`.
 
-The model router currently used by the service is:
+Optional settings:
 
-```text
-openrouter/free
+| Variable | Default | Purpose |
+|-|-|-|
+| `OPENROUTER_MODEL` | *(empty = all free models)* | Comma-separated models to use instead of the automatic free model list |
+| `LLM_MAX_MODEL_ATTEMPTS` | `4` | How many models one request may try before giving up |
+| `LLM_TIMEOUT_SECONDS` | `120` | Timeout for one LLM request |
+| `AI_SERVICE_TOKEN` | *(empty)* | Shared secret; when set, Spring Boot must send the same value (see Backend Setup) |
+| `AI_DATA_DIR` | `ai-service/data` | Where ChromaDB and temporary uploads are stored |
+
+**How models are chosen.** By default the service asks OpenRouter which `:free` chat models exist (refreshed every hour) and tries them in order, starting with a preferred list in `config.py`. When a model is rate-limited, removed or fails, the next model is tried and the failed one is skipped for a while, so later requests go straight to a working model.
+
+**Free limits.** An OpenRouter account without credits gets 50 free requests per day *in total*, shared by all free models, so switching models does not help once that is used up. The service then reports "daily limit reached" (it resets at midnight UTC). Adding credits to the account raises the free limit.
+
+To use specific models instead, for example a paid one after adding credits, set `OPENROUTER_MODEL=qwen/qwen3.8-27b`. Model IDs must exist on https://openrouter.ai/models.
+
+Check the configuration with one real request:
+
+```powershell
+python scripts/check_openrouter.py
 ```
 
-The `.env` file and API keys are excluded by `.gitignore`.
+Run the tests (no API key or network needed):
+
+```powershell
+python -m pytest tests
+```
 
 \---
 
@@ -569,7 +603,7 @@ For normal local development:
 3. Start React frontend
 ```
 
-Tesseract must already be installed and configured on the machine.
+Tesseract is only needed for scanned (image-only) PDF pages. Without it, those pages are skipped and the rest of the PDF is still processed.
 
 \---
 
@@ -606,14 +640,16 @@ http://localhost:8081
 ## Projects
 
 ```text
-/api/projects
+GET/POST /api/projects
+GET/DELETE /api/projects/{projectId}
 ```
 
 ## Papers
 
 ```text
-/api/projects/{projectId}/papers
-/api/projects/multiple
+GET/POST /api/projects/{projectId}/papers
+DELETE   /api/projects/{projectId}/papers/{documentId}
+POST     /api/projects/multiple
 ```
 
 ## Chat

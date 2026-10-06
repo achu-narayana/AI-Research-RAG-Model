@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 function Login() {
     const navigate = useNavigate();
@@ -16,58 +17,44 @@ function Login() {
     setLoading(true);
 
     try {
-        const response = await fetch(
-            "http://localhost:8081/api/auth/login",
-            {
+        let data;
+
+        try {
+            data = await apiFetch("/api/auth/login", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
+                body: {
                     email,
                     password,
-                }),
-            }
-        );
-
-        // Read response safely even if backend returns empty/non-JSON
-        const rawResponse = await response.text();
-
-        let data = {};
-
-        if (rawResponse.trim()) {
-            try {
-                data = JSON.parse(rawResponse);
-            } catch {
-                data = {
-                    message: rawResponse,
-                };
-            }
-        }
-
-        if (!response.ok) {
-            if (response.status === 401) {
+                },
+                skipAuthRedirect: true,
+            });
+        } catch (err) {
+            if (err.status === 401) {
                 throw new Error("Incorrect email or password.");
             }
 
-            if (response.status === 403) {
+            if (err.status === 403) {
                 throw new Error("You are not allowed to sign in.");
             }
 
-            if (response.status === 400) {
+            if (err.status === 400) {
                 throw new Error(
-                    data.message || "Please enter valid login details."
+                    err.data?.message || "Please enter valid login details."
                 );
             }
 
-            throw new Error(
-                data.message ||
-                data.error ||
-                "Unable to sign in. Please try again."
-            );
+            if (err.status) {
+                throw new Error(
+                    err.data?.message ||
+                    err.data?.error ||
+                    "Unable to sign in. Please try again."
+                );
+            }
+
+            throw err;
         }
 
-        if (!data.token) {
+        if (!data?.token) {
             throw new Error("Login failed. Please try again.");
         }
 

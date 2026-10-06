@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 function NewProject() {
 
@@ -18,50 +19,22 @@ function NewProject() {
         setError("");
         setLoading(true);
 
-        const token = localStorage.getItem("token");
-
-        if (!token) {
-            navigate("/");
-            return;
-        }
-
         try {
 
-            const response = await fetch(
-                "http://localhost:8081/api/projects",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        title,
-                        description,
-                    }),
-                }
-            );
-
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
-                return;
-            }
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(
-                    data.message || "Failed to create project"
-                );
-            }
+            await apiFetch("/api/projects", {
+                method: "POST",
+                body: {
+                    title,
+                    description,
+                },
+            });
 
             // Project created successfully
             navigate("/dashboard");
 
         } catch (err) {
 
-            setError(err.message);
+            setError(err.message || "Failed to create project");
 
         } finally {
 
@@ -83,9 +56,10 @@ function NewProject() {
 
                 <form onSubmit={handleCreateProject}>
 
-                    <label>Project Title</label>
+                    <label htmlFor="project-title">Project Title</label>
 
                     <input
+                        id="project-title"
                         type="text"
                         placeholder="Enter project title"
                         value={title}
@@ -93,9 +67,10 @@ function NewProject() {
                         required
                     />
 
-                    <label>Description</label>
+                    <label htmlFor="project-description">Description</label>
 
                     <textarea
+                        id="project-description"
                         placeholder="Describe your research project"
                         value={description}
                         onChange={(e) =>

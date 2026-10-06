@@ -7,8 +7,10 @@ import {
     Plus,
     Sparkles,
     BookOpen,
-    Layers3
+    Layers3,
+    Trash2
 } from "lucide-react";
+import { apiFetch, clearSession, isAbortError } from "../api";
 
 function Dashboard() {
 
@@ -17,6 +19,8 @@ function Dashboard() {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [deletingId, setDeletingId] = useState(null);
 
 
     // =========================================================
@@ -25,79 +29,36 @@ function Dashboard() {
 
     useEffect(() => {
 
+        const controller = new AbortController();
+
         const fetchProjects = async () => {
-
-            const token =
-                localStorage.getItem("token");
-
-            if (!token) {
-                navigate("/");
-                return;
-            }
 
             try {
 
                 setLoading(true);
 
-                const response =
-                    await fetch(
-                        "http://localhost:8081/api/projects",
+                const data =
+                    await apiFetch(
+                        "/api/projects",
                         {
                             method: "GET",
-                            headers: {
-                                Authorization:
-                                    `Bearer ${token}`,
-                            },
+                            signal: controller.signal,
                         }
                     );
 
-
-                // ---------------------------------------------
-                // AUTHENTICATION
-                // ---------------------------------------------
-
-                if (
-                    response.status === 401 ||
-                    response.status === 403
-                ) {
-
-                    localStorage.removeItem("token");
-                    navigate("/");
-
-                    return;
-                }
-
-
-                // ---------------------------------------------
-                // ERROR
-                // ---------------------------------------------
-
-                if (!response.ok) {
-
-                    throw new Error(
-                        "Failed to load projects"
-                    );
-                }
-
-
-                // ---------------------------------------------
-                // DATA
-                // ---------------------------------------------
-
-                const data =
-                    await response.json();
-
-                setProjects(data);
+                setProjects(Array.isArray(data) ? data : []);
+                setLoading(false);
 
             } catch (err) {
+
+                if (isAbortError(err)) {
+                    return;
+                }
 
                 setError(
                     err.message ||
                     "Failed to load projects"
                 );
-
-            } finally {
-
                 setLoading(false);
             }
         };
@@ -105,7 +66,9 @@ function Dashboard() {
 
         fetchProjects();
 
-    }, [navigate]);
+        return () => controller.abort();
+
+    }, []);
 
 
     // =========================================================
@@ -114,7 +77,7 @@ function Dashboard() {
 
     const handleLogout = () => {
 
-        localStorage.removeItem("token");
+        clearSession();
 
         navigate("/");
     };
@@ -129,6 +92,49 @@ function Dashboard() {
         navigate(
             `/projects/${projectId}`
         );
+    };
+
+
+    // =========================================================
+    // DELETE PROJECT
+    // =========================================================
+
+    const deleteProject = async (project) => {
+
+        const confirmed = window.confirm(
+            `Delete the project "${project.title}"? ` +
+            "This removes its papers and chat history and cannot be undone."
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        setActionError("");
+        setDeletingId(project.id);
+
+        try {
+
+            await apiFetch(
+                `/api/projects/${project.id}`,
+                { method: "DELETE" }
+            );
+
+            setProjects((current) =>
+                current.filter((item) => item.id !== project.id)
+            );
+
+        } catch (err) {
+
+            setActionError(
+                err.message ||
+                "Failed to delete project"
+            );
+
+        } finally {
+
+            setDeletingId(null);
+        }
     };
 
 
@@ -417,6 +423,31 @@ function Dashboard() {
                 )}
 
 
+                {actionError && (
+
+                    <div className="dashboard-error-card" role="alert">
+
+                        <div className="dashboard-error-icon">
+                            !
+                        </div>
+
+                        <div>
+
+                            <strong>
+                                Could not delete project
+                            </strong>
+
+                            <p>
+                                {actionError}
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                )}
+
+
                 {/* =================================================
                     EMPTY STATE
                 ================================================= */}
@@ -570,6 +601,27 @@ function Dashboard() {
                                             </div>
 
 
+                                            <div className="dashboard-project-actions">
+
+                                            <button
+                                                type="button"
+                                                className="delete-button"
+                                                onClick={() =>
+                                                    deleteProject(project)
+                                                }
+                                                disabled={
+                                                    deletingId === project.id
+                                                }
+                                                aria-label={
+                                                    `Delete project ${project.title}`
+                                                }
+                                                title="Delete project"
+                                            >
+
+                                                <Trash2 size={15} />
+
+                                            </button>
+
                                             <button
                                                 onClick={() =>
                                                     openProject(
@@ -585,6 +637,8 @@ function Dashboard() {
                                                 />
 
                                             </button>
+
+                                            </div>
 
                                         </div>
 

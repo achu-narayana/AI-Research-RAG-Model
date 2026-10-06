@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { apiFetch } from "../api";
 
 function Register() {
 
@@ -19,55 +20,40 @@ function Register() {
     setLoading(true);
 
     try {
-        const response = await fetch(
-            "http://localhost:8081/api/auth/register",
-            {
+        try {
+            await apiFetch("/api/auth/register", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
+                body: {
                     name,
                     email,
                     password,
-                }),
-            }
-        );
-
-        // Read response safely
-        const rawResponse = await response.text();
-
-        let data = {};
-
-        if (rawResponse.trim()) {
-            try {
-                data = JSON.parse(rawResponse);
-            } catch {
-                data = {
-                    message: rawResponse,
-                };
-            }
-        }
-
-        if (!response.ok) {
-            if (response.status === 409) {
+                },
+                skipAuthRedirect: true,
+            });
+        } catch (err) {
+            if (err.status === 409) {
                 throw new Error(
+                    err.data?.message ||
                     "An account with this email already exists."
                 );
             }
 
-            if (response.status === 400) {
+            if (err.status === 400) {
                 throw new Error(
-                    data.message ||
+                    err.data?.message ||
                     "Please check your details and try again."
                 );
             }
 
-            throw new Error(
-                data.message ||
-                data.error ||
-                "Unable to create account. Please try again."
-            );
+            if (err.status) {
+                throw new Error(
+                    err.data?.message ||
+                    err.data?.error ||
+                    "Unable to create account. Please try again."
+                );
+            }
+
+            throw err;
         }
 
         navigate("/");

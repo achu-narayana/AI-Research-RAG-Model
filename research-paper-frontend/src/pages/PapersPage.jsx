@@ -1,5 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { apiFetch, isAbortError } from "../api";
+
+function getStatusInfo(status) {
+    const normalized = (status || "").toUpperCase();
+
+    if (normalized === "PROCESSING") {
+        return { label: "Processing…", className: "status-processing" };
+    }
+
+    if (normalized === "READY" || normalized === "UPLOADED") {
+        return { label: "Ready", className: "status-ready" };
+    }
+
+    return {
+        label: status,
+        className: `status-${normalized.toLowerCase()}`,
+    };
+}
 
 function PapersPage() {
     const { projectId } = useParams();
@@ -10,52 +28,46 @@ function PapersPage() {
     const [selectedFiles, setSelectedFiles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [deletingId, setDeletingId] = useState(null);
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
 
+    // Incrementing this re-runs the effect below to reload the list.
+    const [reloadKey, setReloadKey] = useState(0);
+
     useEffect(() => {
-        fetchPapers();
-    }, [projectId]);
+        // State is reset on project change because App.jsx
+        // remounts this page with key={projectId}.
+        const controller = new AbortController();
 
-    const fetchPapers = async () => {
-        const token = localStorage.getItem("token");
+        const fetchPapers = async () => {
+            try {
+                const data = await apiFetch(
+                    `/api/projects/${projectId}/papers`,
+                    {
+                        method: "GET",
+                        signal: controller.signal,
+                    }
+                );
 
-        if (!token) {
-            navigate("/");
-            return;
-        }
+                setPapers(Array.isArray(data) ? data : []);
+                setError("");
+                setLoading(false);
 
-        try {
-            const response = await fetch(
-                `http://localhost:8081/api/projects/${projectId}/papers`,
-                {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
+            } catch (err) {
+                if (isAbortError(err)) {
+                    return;
                 }
-            );
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
-                return;
+                setError(err.message || "Failed to load papers");
+                setLoading(false);
             }
+        };
 
-            if (!response.ok) {
-                throw new Error("Failed to load papers");
-            }
+        fetchPapers();
 
-            const data = await response.json();
-
-            setPapers(Array.isArray(data) ? data : []);
-
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
+        return () => controller.abort();
+    }, [projectId, reloadKey]);
 
     const handleFileSelection = (event) => {
         setError("");
@@ -112,13 +124,6 @@ function PapersPage() {
             return;
         }
 
-        const token = localStorage.getItem("token");
-
-        if (!token) {
-            setError("Your session has expired. Please login again.");
-            return;
-        }
-
         setUploading(true);
         setError("");
         setSuccess("");
@@ -132,49 +137,10 @@ function PapersPage() {
 
             formData.append("projectId", projectId);
 
-            const response = await fetch(
-                "http://localhost:8081/api/projects/multiple",
-                {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: formData,
-                }
-            );
-
-            // Do NOT automatically redirect.
-            // We want to see the real error if authentication fails.
-            if (response.status === 401) {
-                throw new Error(
-                    "Authentication failed. Please login again."
-                );
-            }
-
-            if (response.status === 403) {
-                throw new Error(
-                    "You do not have permission to upload to this project."
-                );
-            }
-
-            const contentType =
-                response.headers.get("content-type") || "";
-
-            let data;
-
-            if (contentType.includes("application/json")) {
-                data = await response.json();
-            } else {
-                data = await response.text();
-            }
-
-            if (!response.ok) {
-                throw new Error(
-                    typeof data === "object"
-                        ? data.message || "Failed to upload papers"
-                        : data || "Failed to upload papers"
-                );
-            }
+            const data = await apiFetch("/api/projects/multiple", {
+                method: "POST",
+                body: formData,
+            });
 
             // Backend multiple-upload endpoint should return an array
             const uploadedPapers = Array.isArray(data)
@@ -193,12 +159,44 @@ function PapersPage() {
             }
 
             // Reload papers from backend
-            await fetchPapers();
+            setReloadKey((key) => key + 1);
 
         } catch (err) {
-            setError(err.message);
+            setError(err.message || "Failed to upload papers");
         } finally {
             setUploading(false);
+        }
+    };
+
+    const handleDeletePaper = async (paper) => {
+        const confirmed = window.confirm(
+            `Delete "${paper.originalFileName}" from this project? ` +
+            "This cannot be undone."
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        setError("");
+        setSuccess("");
+        setDeletingId(paper.documentId);
+
+        try {
+            await apiFetch(
+                `/api/projects/${projectId}/papers/${paper.documentId}`,
+                { method: "DELETE" }
+            );
+
+            setPapers((currentPapers) =>
+                currentPapers.filter(
+                    (item) => item.documentId !== paper.documentId
+                )
+            );
+        } catch (err) {
+            setError(err.message || "Failed to delete paper");
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -364,7 +362,11 @@ function PapersPage() {
 
                         <div className="papers-list">
 
-                            {papers.map((paper) => (
+                            {papers.map((paper) => {
+
+                                const statusInfo = getStatusInfo(paper.status);
+
+                                return (
 
                                 <div
                                     className="paper-item"
@@ -393,18 +395,33 @@ function PapersPage() {
                                     <div className="paper-status">
 
                                         <span
-                                            className={`status-badge status-${(
-                                                paper.status || ""
-                                            ).toLowerCase()}`}
+                                            className={`status-badge ${statusInfo.className}`}
                                         >
-                                            {paper.status}
+                                            {statusInfo.label}
                                         </span>
+
+                                        <button
+                                            type="button"
+                                            className="delete-button"
+                                            onClick={() =>
+                                                handleDeletePaper(paper)
+                                            }
+                                            disabled={
+                                                deletingId === paper.documentId
+                                            }
+                                            aria-label={`Delete ${paper.originalFileName}`}
+                                        >
+                                            {deletingId === paper.documentId
+                                                ? "Deleting..."
+                                                : "Delete"}
+                                        </button>
 
                                     </div>
 
                                 </div>
 
-                            ))}
+                                );
+                            })}
 
                         </div>
 

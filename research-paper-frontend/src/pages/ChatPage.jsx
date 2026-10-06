@@ -16,6 +16,92 @@ import {
     Sparkles,
     X,
 } from "lucide-react";
+import {
+    apiFetch,
+    clearSession,
+    downloadChatPdf,
+    isAbortError,
+} from "../api";
+
+const FOCUSABLE_SELECTOR = [
+    "button:not([disabled])",
+    "[href]",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+].join(", ");
+
+/*
+ * Accessibility helper for modal dialogs:
+ * - focuses the first focusable element when opened
+ * - closes on Escape (when allowed)
+ * - returns focus to the previously focused element when closed
+ */
+function useDialogAccessibility(isOpen, onClose, canClose, fallbackFocusRef) {
+    const dialogRef = useRef(null);
+    const onCloseRef = useRef(onClose);
+    const canCloseRef = useRef(canClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+        canCloseRef.current = canClose;
+    });
+
+    useEffect(() => {
+        if (!isOpen) {
+            return undefined;
+        }
+
+        const previouslyFocused = document.activeElement;
+        const fallbackElement = fallbackFocusRef?.current;
+
+        const firstFocusable =
+            dialogRef.current?.querySelector(FOCUSABLE_SELECTOR);
+        firstFocusable?.focus();
+
+        const handleKeyDown = (event) => {
+            if (event.key === "Escape" && canCloseRef.current) {
+                event.preventDefault();
+                onCloseRef.current();
+            }
+        };
+
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("keydown", handleKeyDown);
+
+            const focusTarget =
+                previouslyFocused &&
+                previouslyFocused !== document.body &&
+                previouslyFocused.isConnected
+                    ? previouslyFocused
+                    : fallbackElement;
+
+            focusTarget?.focus?.();
+        };
+    }, [isOpen, fallbackFocusRef]);
+
+    return dialogRef;
+}
+
+// Older messages may not have a messageType yet; treat them as chat.
+function getMessageType(msg) {
+    return msg.messageType || "CHAT";
+}
+
+function parseAiResponse(rawData) {
+    if (typeof rawData === "string") {
+        try {
+            return JSON.parse(rawData);
+        } catch {
+            return null;
+        }
+    }
+
+    return rawData;
+}
 
 function ChatPage() {
     const { projectId } = useParams();
@@ -44,10 +130,28 @@ function ChatPage() {
 
     const chatEndRef = useRef(null);
     const textareaRef = useRef(null);
+    const toolsWrapRef = useRef(null);
+    const toolsButtonRef = useRef(null);
 
-    const token = localStorage.getItem("token");
+    // Always holds the project currently shown, so results of
+    // requests started for another project can be dropped.
+    const projectIdRef = useRef(projectId);
 
     const busy = sending || summarizing || comparing;
+
+    const summaryDialogRef = useDialogAccessibility(
+        showSummaryModal,
+        () => setShowSummaryModal(false),
+        !summarizing,
+        textareaRef
+    );
+
+    const compareDialogRef = useDialogAccessibility(
+        showCompareModal,
+        () => setShowCompareModal(false),
+        !comparing,
+        textareaRef
+    );
 
     const selectedPaperName = useMemo(() => {
         if (!selectedDocumentId) {
@@ -60,6 +164,17 @@ function ChatPage() {
             )?.originalFileName || "Selected paper"
         );
     }, [papers, selectedDocumentId]);
+
+    const getPaperName = (documentId) => {
+        if (!documentId) {
+            return null;
+        }
+
+        return (
+            papers.find((paper) => paper.documentId === documentId)
+                ?.originalFileName || null
+        );
+    };
 
     const formatMessageTime = (createdAt) => {
         if (!createdAt) {
@@ -79,79 +194,57 @@ function ChatPage() {
     };
 
     useEffect(() => {
-        if (!token) {
-            navigate("/");
-            return;
-        }
+        projectIdRef.current = projectId;
+
+        // Page state is reset on project change because App.jsx
+        // remounts this page with key={projectId}.
+        const controller = new AbortController();
 
         const loadData = async () => {
             try {
-                setLoading(true);
-                setError("");
-
-                const [chatResponse, papersResponse] = await Promise.all([
-                    fetch(
-                        `http://localhost:8081/api/projects/${projectId}/chat/messages`,
-                        {
-                            method: "GET",
-                            headers: {
-                                Authorization: `Bearer ${token}`,
-                            },
-                        }
-                    ),
-                    fetch(
-                        `http://localhost:8081/api/projects/${projectId}/papers`,
-                        {
-                            method: "GET",
-                            headers: {
-                                Authorization: `Bearer ${token}`,
-                            },
-                        }
-                    ),
+                const [chatData, papersData] = await Promise.all([
+                    apiFetch(`/api/projects/${projectId}/chat/messages`, {
+                        method: "GET",
+                        signal: controller.signal,
+                    }),
+                    apiFetch(`/api/projects/${projectId}/papers`, {
+                        method: "GET",
+                        signal: controller.signal,
+                    }),
                 ]);
 
-                if (
-                    chatResponse.status === 401 ||
-                    chatResponse.status === 403 ||
-                    papersResponse.status === 401 ||
-                    papersResponse.status === 403
-                ) {
-                    localStorage.removeItem("token");
-                    navigate("/");
+                const loadedPapers = Array.isArray(papersData)
+                    ? papersData
+                    : [];
+
+                setMessages(Array.isArray(chatData) ? chatData : []);
+                setPapers(loadedPapers);
+
+                if (loadedPapers.length > 0) {
+                    setSummaryDocumentId(loadedPapers[0].documentId);
+                }
+
+                setLoading(false);
+            } catch (err) {
+                if (isAbortError(err)) {
                     return;
                 }
 
-                if (!chatResponse.ok) {
-                    throw new Error("Failed to load chat history");
-                }
-
-                if (!papersResponse.ok) {
-                    throw new Error("Failed to load research papers");
-                }
-
-                const chatData = await chatResponse.json();
-                const papersData = await papersResponse.json();
-
-                setMessages(chatData);
-                setPapers(papersData);
-                setSelectedDocumentId("");
-
-                if (papersData.length > 0) {
-                    setSummaryDocumentId(papersData[0].documentId);
-                } else {
-                    setSummaryDocumentId("");
-                }
-            } catch (err) {
                 setError(
                     err.message || "Failed to load research chat"
                 );
-            } finally {
                 setLoading(false);
             }
         };
 
         loadData();
-    }, [projectId, navigate, token]);
+
+        return () => {
+            controller.abort();
+            // Drop results of requests that finish after leaving.
+            projectIdRef.current = null;
+        };
+    }, [projectId]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({
@@ -170,12 +263,46 @@ function ChatPage() {
         }
     }, [message]);
 
+    // Close the tools menu on Escape or on a click outside of it
+    useEffect(() => {
+        if (!showTools) {
+            return undefined;
+        }
+
+        const handlePointerDown = (event) => {
+            if (
+                toolsWrapRef.current &&
+                !toolsWrapRef.current.contains(event.target)
+            ) {
+                setShowTools(false);
+            }
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === "Escape") {
+                setShowTools(false);
+                toolsButtonRef.current?.focus();
+            }
+        };
+
+        document.addEventListener("mousedown", handlePointerDown);
+        document.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            document.removeEventListener("mousedown", handlePointerDown);
+            document.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [showTools]);
+
     const sendMessage = async () => {
+        const typedMessage = message;
         const trimmedMessage = message.trim();
 
         if (!trimmedMessage || busy) {
             return;
         }
+
+        const requestProjectId = projectId;
 
         setError("");
 
@@ -183,7 +310,9 @@ function ChatPage() {
             id: `temp-${Date.now()}`,
             role: "USER",
             content: trimmedMessage,
+            messageType: "CHAT",
             documentId: selectedDocumentId || null,
+            secondDocumentId: null,
             createdAt: new Date().toISOString(),
         };
 
@@ -192,49 +321,43 @@ function ChatPage() {
         setSending(true);
 
         try {
-            const response = await fetch(
-                `http://localhost:8081/api/projects/${projectId}/chat/messages`,
+            const assistantMessage = await apiFetch(
+                `/api/projects/${requestProjectId}/chat/messages`,
                 {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
+                    body: {
                         message: trimmedMessage,
                         documentId: selectedDocumentId || null,
-                    }),
+                    },
                 }
             );
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
+            if (projectIdRef.current !== requestProjectId) {
                 return;
             }
 
-            if (!response.ok) {
-                let errorMessage = "Failed to send message";
-
-                try {
-                    const errorData = await response.json();
-                    if (errorData.message) {
-                        errorMessage = errorData.message;
-                    }
-                } catch {
-                    // Ignore JSON parsing error.
-                }
-
-                throw new Error(errorMessage);
+            if (!assistantMessage || typeof assistantMessage !== "object") {
+                throw new Error("The server returned an invalid response.");
             }
-
-            const assistantMessage = await response.json();
 
             setMessages((prev) => [...prev, assistantMessage]);
         } catch (err) {
+            if (projectIdRef.current !== requestProjectId) {
+                return;
+            }
+
+            // Undo the optimistic message and give the text back
+            setMessages((prev) =>
+                prev.filter(
+                    (item) => item.id !== temporaryUserMessage.id
+                )
+            );
+            setMessage((current) => current || typedMessage);
             setError(err.message || "Failed to send message");
         } finally {
-            setSending(false);
+            if (projectIdRef.current === requestProjectId) {
+                setSending(false);
+            }
         }
     };
 
@@ -273,82 +396,57 @@ function ChatPage() {
             return;
         }
 
+        const requestProjectId = projectId;
+        const requestDocumentId = summaryDocumentId;
+
         setError("");
         setSummarizing(true);
 
         try {
-            const response = await fetch(
-                "http://localhost:8081/api/ai/summary",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        projectId: Number(projectId),
-                        documentId: summaryDocumentId,
-                    }),
-                }
-            );
+            const rawData = await apiFetch("/api/ai/summary", {
+                method: "POST",
+                body: {
+                    projectId: Number(requestProjectId),
+                    documentId: requestDocumentId,
+                },
+            });
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
+            if (projectIdRef.current !== requestProjectId) {
                 return;
             }
 
-            if (!response.ok) {
-                let errorMessage = "Failed to generate summary";
+            const summaryText = parseAiResponse(rawData)?.summary;
 
-                try {
-                    const errorData = await response.json();
-                    if (errorData.message) {
-                        errorMessage = errorData.message;
-                    } else if (errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch {
-                    // Ignore JSON parsing error.
-                }
-
-                throw new Error(errorMessage);
+            if (typeof summaryText !== "string" || !summaryText.trim()) {
+                throw new Error(
+                    "No summary was returned by the AI service."
+                );
             }
-
-            const rawData = await response.json();
-            let summaryData = rawData;
-
-            if (typeof rawData === "string") {
-                try {
-                    summaryData = JSON.parse(rawData);
-                } catch {
-                    summaryData = { summary: rawData };
-                }
-            }
-
-            const summaryText =
-                summaryData?.summary ||
-                summaryData?.message ||
-                summaryData?.result ||
-                "No summary was returned by the AI service.";
 
             const summaryMessage = {
                 id: `summary-${Date.now()}`,
                 role: "ASSISTANT",
                 content: summaryText,
-                documentId: summaryDocumentId,
+                messageType: "SUMMARY",
+                documentId: requestDocumentId,
+                secondDocumentId: null,
                 createdAt: new Date().toISOString(),
-                isSummary: true,
             };
 
             setMessages((prev) => [...prev, summaryMessage]);
             setShowSummaryModal(false);
         } catch (err) {
+            if (projectIdRef.current !== requestProjectId) {
+                return;
+            }
+
             setError(
                 err.message || "Failed to generate summary"
             );
         } finally {
-            setSummarizing(false);
+            if (projectIdRef.current === requestProjectId) {
+                setSummarizing(false);
+            }
         }
     };
 
@@ -404,85 +502,62 @@ function ChatPage() {
             return;
         }
 
+        const requestProjectId = projectId;
+        const requestDocumentId1 = compareDocumentId1;
+        const requestDocumentId2 = compareDocumentId2;
+
         setError("");
         setComparing(true);
 
         try {
-            const response = await fetch(
-                "http://localhost:8081/api/ai/compare",
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        projectId: Number(projectId),
-                        documentId1: compareDocumentId1,
-                        documentId2: compareDocumentId2,
-                    }),
-                }
-            );
+            const rawData = await apiFetch("/api/ai/compare", {
+                method: "POST",
+                body: {
+                    projectId: Number(requestProjectId),
+                    documentId1: requestDocumentId1,
+                    documentId2: requestDocumentId2,
+                },
+            });
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
+            if (projectIdRef.current !== requestProjectId) {
                 return;
             }
 
-            if (!response.ok) {
-                let errorMessage = "Failed to compare research papers";
+            const comparisonText = parseAiResponse(rawData)?.comparison;
 
-                try {
-                    const errorData = await response.json();
-                    if (errorData.message) {
-                        errorMessage = errorData.message;
-                    } else if (errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch {
-                    // Ignore JSON parsing error.
-                }
-
-                throw new Error(errorMessage);
+            if (
+                typeof comparisonText !== "string" ||
+                !comparisonText.trim()
+            ) {
+                throw new Error(
+                    "No comparison was returned by the AI service."
+                );
             }
-
-            const rawData = await response.json();
-            let comparisonData = rawData;
-
-            if (typeof rawData === "string") {
-                try {
-                    comparisonData = JSON.parse(rawData);
-                } catch {
-                    comparisonData = { comparison: rawData };
-                }
-            }
-
-            const comparisonText =
-                comparisonData?.comparison ||
-                comparisonData?.message ||
-                comparisonData?.result ||
-                "No comparison was returned by the AI service.";
 
             const comparisonMessage = {
                 id: `comparison-${Date.now()}`,
                 role: "ASSISTANT",
                 content: comparisonText,
-                documentId: null,
+                messageType: "COMPARISON",
+                documentId: requestDocumentId1,
+                secondDocumentId: requestDocumentId2,
                 createdAt: new Date().toISOString(),
-                isComparison: true,
-                comparisonDocumentId1: compareDocumentId1,
-                comparisonDocumentId2: compareDocumentId2,
             };
 
             setMessages((prev) => [...prev, comparisonMessage]);
             setShowCompareModal(false);
         } catch (err) {
+            if (projectIdRef.current !== requestProjectId) {
+                return;
+            }
+
             setError(
                 err.message || "Failed to compare research papers"
             );
         } finally {
-            setComparing(false);
+            if (projectIdRef.current === requestProjectId) {
+                setComparing(false);
+            }
         }
     };
 
@@ -494,59 +569,19 @@ function ChatPage() {
     };
 
     const handleLogout = () => {
-        localStorage.removeItem("token");
+        clearSession();
         navigate("/");
     };
 
     const handleDownloadChatPdf = async () => {
-    const token = localStorage.getItem("token");
+        setError("");
 
-    if (!token) {
-        navigate("/");
-        return;
-    }
-
-    try {
-        const response = await fetch(
-            `http://localhost:8081/api/projects/${projectId}/chat/pdf`,
-            {
-                method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            }
-        );
-
-        console.log("PDF response status:", response.status);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-
-            console.log("PDF error response:", errorText);
-
-            throw new Error(
-                `PDF download failed (${response.status})`
-            );
+        try {
+            await downloadChatPdf(projectId);
+        } catch (err) {
+            setError(err.message || "Failed to download chat PDF");
         }
-
-        const blob = await response.blob();
-
-        const url = window.URL.createObjectURL(blob);
-
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "research-project-chat.pdf";
-
-        document.body.appendChild(link);
-        link.click();
-
-        link.remove();
-        window.URL.revokeObjectURL(url);
-
-    } catch (error) {
-        alert(error.message);
-    }
-};
+    };
 
     if (loading) {
         return (
@@ -664,6 +699,7 @@ function ChatPage() {
 
                         <select
                             className="chat-scope-select"
+                            aria-label="Search scope"
                             value={selectedDocumentId}
                             onChange={(e) =>
                                 setSelectedDocumentId(e.target.value)
@@ -729,33 +765,23 @@ function ChatPage() {
                         ) : (
                             messages.map((msg) => {
                                 const isUser = msg.role === "USER";
-                                const isSummary = msg.isSummary === true;
-                                const isComparison = msg.isComparison === true;
+                                const messageType = getMessageType(msg);
+                                const isSummary = messageType === "SUMMARY";
+                                const isComparison =
+                                    messageType === "COMPARISON";
 
-                                const selectedPaperNameForMessage = msg.documentId
-                                    ? papers.find(
-                                          (paper) =>
-                                              paper.documentId === msg.documentId
-                                      )?.originalFileName
+                                const selectedPaperNameForMessage =
+                                    isComparison
+                                        ? null
+                                        : getPaperName(msg.documentId);
+
+                                const comparisonPaperName1 = isComparison
+                                    ? getPaperName(msg.documentId)
                                     : null;
 
-                                const comparisonPaperName1 =
-                                    msg.comparisonDocumentId1
-                                        ? papers.find(
-                                              (paper) =>
-                                                  paper.documentId ===
-                                                  msg.comparisonDocumentId1
-                                          )?.originalFileName
-                                        : null;
-
-                                const comparisonPaperName2 =
-                                    msg.comparisonDocumentId2
-                                        ? papers.find(
-                                              (paper) =>
-                                                  paper.documentId ===
-                                                  msg.comparisonDocumentId2
-                                          )?.originalFileName
-                                        : null;
+                                const comparisonPaperName2 = isComparison
+                                    ? getPaperName(msg.secondDocumentId)
+                                    : null;
 
                                 return (
                                     <article
@@ -822,9 +848,7 @@ function ChatPage() {
                                                 </div>
                                             )}
 
-                                            {isComparison &&
-                                                (comparisonPaperName1 ||
-                                                    comparisonPaperName2) && (
+                                            {isComparison && (
                                                     <div className="chat-message-source chat-message-comparison-source">
                                                         <GitCompare size={12} />
                                                         <span>
@@ -908,7 +932,7 @@ function ChatPage() {
                     </div>
 
                     {error && (
-                        <div className="chat-error-banner">
+                        <div className="chat-error-banner" role="alert">
                             <div className="chat-error-icon">!</div>
                             <span>{error}</span>
                         </div>
@@ -931,8 +955,15 @@ function ChatPage() {
                         </div>
 
                         <div className="chat-composer">
-                            <div className="chat-tools-wrap">
+                            <div
+                                className="chat-tools-wrap"
+                                ref={toolsWrapRef}
+                            >
                                 <button
+                                    ref={toolsButtonRef}
+                                    type="button"
+                                    aria-haspopup="menu"
+                                    aria-expanded={showTools}
                                     className={`chat-tools-button ${
                                         showTools ? "is-open" : ""
                                     }`}
@@ -1043,7 +1074,13 @@ function ChatPage() {
                         }
                     }}
                 >
-                    <div className="chat-modal chat-modal-summary">
+                    <div
+                        className="chat-modal chat-modal-summary"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="summary-dialog-title"
+                        ref={summaryDialogRef}
+                    >
                         <div className="chat-modal-accent chat-modal-accent-summary"></div>
 
                         <div className="chat-modal-header">
@@ -1053,7 +1090,9 @@ function ChatPage() {
                                 </div>
                                 <div>
                                     <p className="chat-modal-kicker">AI TOOL</p>
-                                    <h3>Summarize Research Paper</h3>
+                                    <h3 id="summary-dialog-title">
+                                        Summarize Research Paper
+                                    </h3>
                                     <p>
                                         Generate a structured overview of one
                                         uploaded paper.
@@ -1154,7 +1193,13 @@ function ChatPage() {
                         }
                     }}
                 >
-                    <div className="chat-modal chat-modal-compare">
+                    <div
+                        className="chat-modal chat-modal-compare"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="compare-dialog-title"
+                        ref={compareDialogRef}
+                    >
                         <div className="chat-modal-accent chat-modal-accent-compare"></div>
 
                         <div className="chat-modal-header">
@@ -1164,7 +1209,9 @@ function ChatPage() {
                                 </div>
                                 <div>
                                     <p className="chat-modal-kicker">AI TOOL</p>
-                                    <h3>Compare Research Papers</h3>
+                                    <h3 id="compare-dialog-title">
+                                        Compare Research Papers
+                                    </h3>
                                     <p>
                                         Select two different papers to compare
                                         their research and findings.
