@@ -272,14 +272,36 @@ public class ChatPdfService {
             return "";
         }
 
-        // PDFBox standard fonts cannot display some Unicode characters.
         return text
-                .replace("₹", "Rs.")
-                .replace("—", "-")
-                .replace("–", "-")
-                .replace("“", "\"")
-                .replace("”", "\"")
-                .replace("’", "'")
-                .replace("•", "-");
+                // Currency
+                .replace('\u20B9', 'R')
+
+                // Spaces
+                .replace('\u00A0', ' ')   // non-breaking space
+                .replace('\u202F', ' ')   // narrow no-break space
+                .replace('\u2007', ' ')   // figure space
+                .replace('\u2009', ' ')   // thin space
+                .replace('\u200A', ' ')   // hair space
+
+                // Hyphens / dashes
+                .replace('\u2010', '-')
+                .replace('\u2011', '-')
+                .replace('\u2012', '-')
+                .replace('\u2013', '-')
+                .replace('\u2014', '-')
+
+                // Quotes
+                .replace('\u2018', '\'')
+                .replace('\u2019', '\'')
+                .replace('\u201A', '\'')
+                .replace('\u201B', '\'')
+                .replace('\u201C', '"')
+                .replace('\u201D', '"')
+                .replace('\u201E', '"')
+                .replace('\u201F', '"')
+
+                // Bullet
+                .replace('\u2022', '-');
     }
+    
 }

@@ -499,50 +499,54 @@ function ChatPage() {
     };
 
     const handleDownloadChatPdf = async () => {
-        if (!token) {
-            navigate("/");
-            return;
-        }
+    const token = localStorage.getItem("token");
 
-        try {
-            const response = await fetch(
-                `http://localhost:8081/api/projects/${projectId}/chat/pdf`,
-                {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                }
-            );
+    if (!token) {
+        navigate("/");
+        return;
+    }
 
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem("token");
-                navigate("/");
-                return;
+    try {
+        const response = await fetch(
+            `http://localhost:8081/api/projects/${projectId}/chat/pdf`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
             }
+        );
 
-            if (!response.ok) {
-                throw new Error("Failed to download chat PDF");
-            }
+        console.log("PDF response status:", response.status);
 
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const link = document.createElement("a");
+        if (!response.ok) {
+            const errorText = await response.text();
 
-            link.href = url;
-            link.download = "research-project-chat.pdf";
+            console.log("PDF error response:", errorText);
 
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            window.URL.revokeObjectURL(url);
-        } catch (err) {
-            setError(
-                err.message || "Failed to download chat PDF"
+            throw new Error(
+                `PDF download failed (${response.status})`
             );
         }
-    };
+
+        const blob = await response.blob();
+
+        const url = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "research-project-chat.pdf";
+
+        document.body.appendChild(link);
+        link.click();
+
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+    } catch (error) {
+        alert(error.message);
+    }
+};
 
     if (loading) {
         return (
