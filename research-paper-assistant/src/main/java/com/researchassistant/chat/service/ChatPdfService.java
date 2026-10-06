@@ -2,15 +2,14 @@ package com.researchassistant.chat.service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
-import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.springframework.stereotype.Service;
 
 import com.researchassistant.chat.entity.ChatMessage;
@@ -39,7 +38,8 @@ public class ChatPdfService {
     public byte[] generateChatPdf(Long projectId, String email) {
 
         Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
+                .orElseThrow(() ->
+                        new RuntimeException("Project not found"));
 
         // Check project ownership
         if (!project.getOwner().getEmail().equals(email)) {
@@ -48,15 +48,18 @@ public class ChatPdfService {
         }
 
         var chat = projectChatRepository.findByProject(project)
-                .orElseThrow(() -> new RuntimeException(
-                        "No chat exists for this project"));
+                .orElseThrow(() ->
+                        new RuntimeException(
+                                "No chat exists for this project"));
 
         List<ChatMessage> messages =
-                chatMessageRepository.findAllByChatOrderByCreatedAtAsc(chat);
+                chatMessageRepository
+                        .findAllByChatOrderByCreatedAtAsc(chat);
 
         try (
-            PDDocument document = new PDDocument();
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream()
+                PDDocument document = new PDDocument();
+                ByteArrayOutputStream outputStream =
+                        new ByteArrayOutputStream()
         ) {
 
             PDPage page = new PDPage(PDRectangle.A4);
@@ -69,61 +72,109 @@ public class ChatPdfService {
             PDPageContentStream contentStream =
                     new PDPageContentStream(document, page);
 
-            // Title
+            // =====================================================
+            // TITLE
+            // =====================================================
+
             contentStream.beginText();
+
             contentStream.setFont(
-                    new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD),
+                    new PDType1Font(
+                            Standard14Fonts.FontName.HELVETICA_BOLD
+                    ),
                     20
             );
+
             contentStream.newLineAtOffset(margin, y);
-            contentStream.showText("AI Research Paper Assistant");
+
+            contentStream.showText(
+                    cleanText(
+                            "AI Research Paper Assistant",
+                            true
+                    )
+            );
+
             contentStream.endText();
 
             y -= 35;
 
-            // Project title
+            // =====================================================
+            // PROJECT TITLE
+            // =====================================================
+
             contentStream.beginText();
+
             contentStream.setFont(
-                    new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD),
+                    new PDType1Font(
+                            Standard14Fonts.FontName.HELVETICA_BOLD
+                    ),
                     14
             );
+
             contentStream.newLineAtOffset(margin, y);
+
             contentStream.showText(
-                    "Project: " + cleanText(project.getTitle())
+                    "Project: " +
+                    cleanText(
+                            project.getTitle(),
+                            true
+                    )
             );
+
             contentStream.endText();
 
             y -= 25;
 
-            // Generated date
+            // =====================================================
+            // CHAT HISTORY
+            // =====================================================
+
             contentStream.beginText();
+
             contentStream.setFont(
-                    new PDType1Font(Standard14Fonts.FontName.HELVETICA),
+                    new PDType1Font(
+                            Standard14Fonts.FontName.HELVETICA
+                    ),
                     10
             );
+
             contentStream.newLineAtOffset(margin, y);
+
             contentStream.showText(
-                    "Chat History"
+                    cleanText(
+                            "Chat History",
+                            false
+                    )
             );
+
             contentStream.endText();
 
             y -= 30;
 
             int questionNumber = 0;
 
+            // =====================================================
+            // CHAT MESSAGES
+            // =====================================================
+
             for (ChatMessage message : messages) {
 
                 String role = message.getRole();
-                String text = cleanText(message.getContent());
 
                 if ("USER".equalsIgnoreCase(role)) {
 
                     questionNumber++;
 
-                    // Question heading
+                    // -------------------------------------------------
+                    // QUESTION HEADING
+                    // -------------------------------------------------
+
                     y = writeWrappedText(
                             contentStream,
-                            "Question " + questionNumber,
+                            cleanText(
+                                    "Question " + questionNumber,
+                                    true
+                            ),
                             margin,
                             y,
                             pageWidth - (2 * margin),
@@ -133,9 +184,19 @@ public class ChatPdfService {
 
                     y -= 5;
 
+                    // -------------------------------------------------
+                    // QUESTION TEXT
+                    // -------------------------------------------------
+
+                    String questionText =
+                            cleanText(
+                                    message.getContent(),
+                                    false
+                            );
+
                     y = writeWrappedText(
                             contentStream,
-                            text,
+                            questionText,
                             margin,
                             y,
                             pageWidth - (2 * margin),
@@ -147,9 +208,16 @@ public class ChatPdfService {
 
                 } else if ("ASSISTANT".equalsIgnoreCase(role)) {
 
+                    // -------------------------------------------------
+                    // ANSWER HEADING
+                    // -------------------------------------------------
+
                     y = writeWrappedText(
                             contentStream,
-                            "Answer " + questionNumber,
+                            cleanText(
+                                    "Answer " + questionNumber,
+                                    true
+                            ),
                             margin,
                             y,
                             pageWidth - (2 * margin),
@@ -159,9 +227,19 @@ public class ChatPdfService {
 
                     y -= 5;
 
+                    // -------------------------------------------------
+                    // ANSWER TEXT
+                    // -------------------------------------------------
+
+                    String answerText =
+                            cleanText(
+                                    message.getContent(),
+                                    false
+                            );
+
                     y = writeWrappedText(
                             contentStream,
-                            text,
+                            answerText,
                             margin,
                             y,
                             pageWidth - (2 * margin),
@@ -172,7 +250,10 @@ public class ChatPdfService {
                     y -= 25;
                 }
 
-                // Create a new page if required
+                // =====================================================
+                // CREATE NEW PAGE WHEN NEEDED
+                // =====================================================
+
                 if (y < 70) {
 
                     contentStream.close();
@@ -181,7 +262,10 @@ public class ChatPdfService {
                     document.addPage(page);
 
                     contentStream =
-                            new PDPageContentStream(document, page);
+                            new PDPageContentStream(
+                                    document,
+                                    page
+                            );
 
                     y = 780;
                 }
@@ -194,10 +278,17 @@ public class ChatPdfService {
             return outputStream.toByteArray();
 
         } catch (IOException e) {
+
             throw new RuntimeException(
-                    "Failed to generate chat PDF", e);
+                    "Failed to generate chat PDF",
+                    e
+            );
         }
     }
+
+    // =============================================================
+    // WRITE WRAPPED TEXT
+    // =============================================================
 
     private float writeWrappedText(
             PDPageContentStream contentStream,
@@ -206,55 +297,83 @@ public class ChatPdfService {
             float y,
             float maxWidth,
             float fontSize,
-            boolean bold) throws IOException {
+            boolean bold
+    ) throws IOException {
 
-        PDType1Font font = new PDType1Font(
-                bold
-                        ? Standard14Fonts.FontName.HELVETICA_BOLD
-                        : Standard14Fonts.FontName.HELVETICA
+        PDType1Font font = getFont(bold);
+
+        contentStream.setFont(
+                font,
+                fontSize
         );
 
-        contentStream.setFont(font, fontSize);
-
-        String[] paragraphs = text.split("\\n");
+        String[] paragraphs =
+                text.split("\\n");
 
         for (String paragraph : paragraphs) {
 
-            String[] words = paragraph.split(" ");
-            StringBuilder line = new StringBuilder();
+            String[] words =
+                    paragraph.split(" ");
+
+            StringBuilder line =
+                    new StringBuilder();
 
             for (String word : words) {
 
-                String testLine = line.length() == 0
-                        ? word
-                        : line + " " + word;
+                String testLine =
+                        line.length() == 0
+                                ? word
+                                : line + " " + word;
 
                 float textWidth =
                         font.getStringWidth(testLine)
-                        / 1000 * fontSize;
+                                / 1000
+                                * fontSize;
 
                 if (textWidth > maxWidth) {
 
-                    contentStream.beginText();
-                    contentStream.newLineAtOffset(x, y);
-                    contentStream.showText(line.toString());
-                    contentStream.endText();
+                    // Prevent trying to print an empty line
+                    if (line.length() > 0) {
 
-                    y -= fontSize + 4;
+                        contentStream.beginText();
 
-                    line = new StringBuilder(word);
+                        contentStream.newLineAtOffset(
+                                x,
+                                y
+                        );
+
+                        contentStream.showText(
+                                line.toString()
+                        );
+
+                        contentStream.endText();
+
+                        y -= fontSize + 4;
+                    }
+
+                    line =
+                            new StringBuilder(word);
 
                 } else {
 
-                    line = new StringBuilder(testLine);
+                    line =
+                            new StringBuilder(testLine);
                 }
             }
 
             if (line.length() > 0) {
 
                 contentStream.beginText();
-                contentStream.newLineAtOffset(x, y);
-                contentStream.showText(line.toString());
+
+                contentStream.newLineAtOffset(
+                        x,
+                        y
+                );
+
+                contentStream.showText(
+                        line.toString()
+                );
+
                 contentStream.endText();
 
                 y -= fontSize + 4;
@@ -266,42 +385,85 @@ public class ChatPdfService {
         return y;
     }
 
-    private String cleanText(String text) {
+    // =============================================================
+    // GET PDF FONT
+    // =============================================================
+
+    private PDType1Font getFont(boolean bold) {
+
+        return new PDType1Font(
+                bold
+                        ? Standard14Fonts.FontName.HELVETICA_BOLD
+                        : Standard14Fonts.FontName.HELVETICA
+        );
+    }
+
+    // =============================================================
+    // CLEAN UNSUPPORTED CHARACTERS
+    // =============================================================
+
+    private String cleanText(
+            String text,
+            boolean bold
+    ) {
 
         if (text == null) {
             return "";
         }
 
-        return text
-                // Currency
-                .replace('\u20B9', 'R')
+        PDType1Font font =
+                getFont(bold);
 
-                // Spaces
-                .replace('\u00A0', ' ')   // non-breaking space
-                .replace('\u202F', ' ')   // narrow no-break space
-                .replace('\u2007', ' ')   // figure space
-                .replace('\u2009', ' ')   // thin space
-                .replace('\u200A', ' ')   // hair space
+        StringBuilder cleaned =
+                new StringBuilder();
 
-                // Hyphens / dashes
-                .replace('\u2010', '-')
-                .replace('\u2011', '-')
-                .replace('\u2012', '-')
-                .replace('\u2013', '-')
-                .replace('\u2014', '-')
+        /*
+         * Check every Unicode code point individually.
+         *
+         * If Helvetica supports the character:
+         *      keep it.
+         *
+         * If Helvetica does not support it:
+         *      replace it with a space.
+         *
+         * This means we do NOT need to maintain
+         * a list of problematic characters such as
+         * τ, λ, √, —, ₹, etc.
+         */
 
-                // Quotes
-                .replace('\u2018', '\'')
-                .replace('\u2019', '\'')
-                .replace('\u201A', '\'')
-                .replace('\u201B', '\'')
-                .replace('\u201C', '"')
-                .replace('\u201D', '"')
-                .replace('\u201E', '"')
-                .replace('\u201F', '"')
+        for (int i = 0; i < text.length();) {
 
-                // Bullet
-                .replace('\u2022', '-');
+            int codePoint =
+                    text.codePointAt(i);
+
+            String character =
+                    new String(
+                            Character.toChars(codePoint)
+                    );
+
+            try {
+
+                // Ask PDFBox whether this font
+                // can encode the character.
+                font.encode(character);
+
+                // Supported character
+                cleaned.append(character);
+
+            } catch (IllegalArgumentException | IOException e) {
+
+                // Unsupported character.
+                // Use a space instead of deleting it
+                // so words do not accidentally join.
+                cleaned.append(' ');
+            }
+
+            i +=
+                    Character.charCount(
+                            codePoint
+                    );
+        }
+
+        return cleaned.toString();
     }
-    
 }

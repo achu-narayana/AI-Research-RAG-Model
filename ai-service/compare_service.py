@@ -20,7 +20,7 @@ collection = client.get_or_create_collection(
 
 # Keep the input controlled.
 # Each paper contributes a limited number of chunks.
-MAX_CHUNKS_PER_PAPER = 12
+MAX_CHUNKS_PER_PAPER = 8
 
 
 # =========================================================
@@ -416,10 +416,7 @@ Final Comparison:
         "Sending ONE comparison request to OpenRouter..."
     )
 
-    comparison = ask_llm(
-        prompt,
-        max_tokens=3000
-    )
+    comparison = ask_llm(prompt, max_tokens=1800)
 
     print(
         "Comparison completed successfully."
