@@ -1,244 +1,155 @@
 package com.researchassistant.ai.service;
 
+import com.researchassistant.ai.client.AiHttpClient;
+import com.researchassistant.common.exception.AiServiceException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Service;
-import com.researchassistant.project.entity.Project;
-import com.researchassistant.project.repository.ProjectRepository;
-import com.researchassistant.paper.entity.Paper;
-import com.researchassistant.paper.repository.PaperRepository;
 
+import tools.jackson.databind.JsonNode;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
 @Service
 public class AiService {
 
-    private final HttpClient httpClient;
-    private final ProjectRepository projectRepository;
-    private final PaperRepository paperRepository;
+    private static final Logger log =
+            LoggerFactory.getLogger(AiService.class);
+
+    private final AiHttpClient aiHttpClient;
     private final AiAccessService aiAccessService;
 
-    public AiService(ProjectRepository projectRepository,
-            PaperRepository paperRepository,
+    public AiService(
+            AiHttpClient aiHttpClient,
             AiAccessService aiAccessService) {
-        this.httpClient = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-        this.projectRepository = projectRepository;
-        this.paperRepository = paperRepository;
+
+        this.aiHttpClient = aiHttpClient;
         this.aiAccessService = aiAccessService;
     }
+
+    // =========================================================
+    // ASK QUESTION
+    // =========================================================
 
     public String askQuestion(
             String question,
             Long projectId,
             String documentId,
-            String email
-    )  {
-    	aiAccessService.validateAccess(
+            String email) {
+
+        aiAccessService.validateAccess(
                 projectId,
                 documentId,
                 email
         );
-    	Project project = projectRepository.findById(projectId)
-    	        .orElseThrow(() ->
-    	                new RuntimeException("Project not found"));
 
-    	if (!project.getOwner().getEmail().equals(email)) {
-    	    throw new RuntimeException(
-    	            "You are not authorized to access this project");
-    	}
-    	if (documentId != null && !documentId.isBlank()) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("question", question);
+        body.put("project_id", projectId);
 
-    	    Paper paper = paperRepository.findByDocumentId(documentId)
-    	            .orElseThrow(() ->
-    	                    new RuntimeException("Paper not found"));
-
-    	    if (!paper.getProject().getId().equals(projectId)) {
-    	        throw new RuntimeException(
-    	                "This paper does not belong to the selected project");
-    	    }
-    	}
-
-        try {
-
-            StringBuilder json = new StringBuilder();
-
-            json.append("{")
-                .append("\"question\":\"")
-                .append(escapeJson(question))
-                .append("\",")
-                .append("\"project_id\":")
-                .append(projectId);
-
-            if (documentId != null && !documentId.isBlank()) {
-                json.append(",")
-                    .append("\"document_id\":\"")
-                    .append(escapeJson(documentId))
-                    .append("\"");
-            }
-
-            json.append("}");
-
-            String jsonBody = json.toString();
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(
-                            "http://127.0.0.1:8000/api/ai/ask"))
-                    .header("Content-Type", "application/json")
-                    .POST(
-                            HttpRequest.BodyPublishers.ofString(jsonBody)
-                    )
-                    .build();
-
-            HttpResponse<String> response =
-                    httpClient.send(
-                            request,
-                            HttpResponse.BodyHandlers.ofString()
-                    );
-
-            System.out.println(
-                    "Python ask status: " + response.statusCode());
-
-            System.out.println(
-                    "Python ask response: " + response.body());
-
-            if (response.statusCode() != 200) {
-                throw new RuntimeException(
-                        "AI service returned status "
-                        + response.statusCode()
-                        + ": "
-                        + response.body()
-                );
-            }
-
-            String responseBody = response.body();
-
-            String answerKey = "\"answer\":\"";
-
-            int start = responseBody.indexOf(answerKey);
-
-            if (start == -1) {
-                throw new RuntimeException(
-                        "Answer not found in AI service response"
-                );
-            }
-
-            start += answerKey.length();
-
-            int end = responseBody.lastIndexOf("\"");
-
-            if (end <= start) {
-                throw new RuntimeException(
-                        "Invalid AI service response"
-                );
-            }
-
-            String answer = responseBody.substring(start, end);
-
-            // Basic JSON unescaping
-            answer = answer
-                    .replace("\\n", "\n")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-
-            return answer;
-
-        } catch (Exception e) {
-
-            throw new RuntimeException(
-                    "Failed to communicate with AI service",
-                    e
-            );
+        if (documentId != null && !documentId.isBlank()) {
+            body.put("document_id", documentId);
         }
-    }
-    private String escapeJson(String value) {
 
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        JsonNode response =
+                aiHttpClient.postJson("/api/ai/ask", body);
+
+        if (response == null || !response.hasNonNull("answer")) {
+            throw new AiServiceException(
+                    "Answer not found in AI service response");
+        }
+
+        String answer = response.get("answer").asString();
+
+        log.info("Received answer for project {} ({} chars)",
+                projectId, answer.length());
+
+        return answer;
     }
-    public String ingestPaper(
+
+    // =========================================================
+    // INGEST PAPER
+    // =========================================================
+
+    /**
+     * Sends a PDF to the Python service for chunking and embedding.
+     *
+     * @param fileName the stored (UUID) file name; never the
+     *                 user-supplied original file name
+     */
+    public void ingestPaper(
             byte[] fileBytes,
             String fileName,
             String documentId,
             Long projectId) {
 
-        try {
+        String boundary = "----ResearchPaperBoundary" + UUID.randomUUID();
 
-            String boundary = "----ResearchPaperBoundary" + System.currentTimeMillis();
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
 
-            ByteArrayOutputStream body = new ByteArrayOutputStream();
-            body.write(("--" + boundary + "\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
+        writeFormField(body, boundary, "document_id", documentId);
+        writeFormField(body, boundary, "project_id", String.valueOf(projectId));
 
-            body.write(("Content-Disposition: form-data; name=\"document_id\"\r\n\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
+        writeAscii(body, "--" + boundary + "\r\n");
+        writeAscii(body, "Content-Disposition: form-data; name=\"file\"; filename=\""
+                + fileName + "\"\r\n");
+        writeAscii(body, "Content-Type: application/pdf\r\n\r\n");
+        body.writeBytes(fileBytes);
+        writeAscii(body, "\r\n--" + boundary + "--\r\n");
 
-            body.write((documentId + "\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
+        log.info("Sending PDF {} ({} bytes) to AI service",
+                fileName, fileBytes.length);
 
-            body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-            body.write(("Content-Disposition: form-data; name=\"project_id\"\r\n\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
-            body.write((projectId + "\r\n").getBytes(StandardCharsets.UTF_8));
+        aiHttpClient.postMultipart(
+                "/api/ai/ingest",
+                body.toByteArray(),
+                boundary
+        );
+    }
 
-            body.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-            body.write(("Content-Disposition: form-data; name=\"file\"; filename=\""
-                    + fileName + "\"\r\n").getBytes(StandardCharsets.UTF_8));
-            body.write(("Content-Type: application/pdf\r\n\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
+    // =========================================================
+    // DELETE VECTORS
+    // =========================================================
 
-            body.write(fileBytes);
+    public void deleteProjectVectors(Long projectId) {
 
-            body.write(("\r\n--" + boundary + "--\r\n")
-                    .getBytes(StandardCharsets.UTF_8));
+        aiHttpClient.delete("/api/ai/projects/" + projectId);
+    }
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.1:8000/api/ai/ingest"))
-                    .header("Content-Type",
-                            "multipart/form-data; boundary=" + boundary)
-                    .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
-                    .build();
+    public void deleteDocumentVectors(
+            String documentId,
+            Long projectId) {
 
-            System.out.println("Sending PDF to Python: " + fileName);
+        aiHttpClient.delete(
+                "/api/ai/documents/"
+                        + URLEncoder.encode(documentId, StandardCharsets.UTF_8)
+                        + "?project_id=" + projectId
+        );
+    }
 
-            HttpResponse<String> response =
-                    httpClient.send(
-                            request,
-                            HttpResponse.BodyHandlers.ofString()
-                    );
+    // =========================================================
+    // MULTIPART HELPERS
+    // =========================================================
 
-            System.out.println("Python ingest status: "
-                    + response.statusCode());
+    private void writeFormField(
+            ByteArrayOutputStream body,
+            String boundary,
+            String name,
+            String value) {
 
-            System.out.println("Python ingest response: "
-                    + response.body());
+        writeAscii(body, "--" + boundary + "\r\n");
+        writeAscii(body, "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n");
+        body.writeBytes((value + "\r\n").getBytes(StandardCharsets.UTF_8));
+    }
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException(
-                        "Python AI ingestion failed: "
-                        + response.statusCode()
-                        + ": "
-                        + response.body()
-                );
-            }
-
-            return response.body();
-
-        } catch (IOException | InterruptedException e) {
-
-            throw new RuntimeException(
-                    "Failed to send PDF to AI service",
-                    e
-            );
-        }
+    private void writeAscii(ByteArrayOutputStream body, String text) {
+        body.writeBytes(text.getBytes(StandardCharsets.UTF_8));
     }
 }

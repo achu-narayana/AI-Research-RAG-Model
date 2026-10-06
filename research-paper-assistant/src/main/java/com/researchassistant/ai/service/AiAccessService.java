@@ -1,22 +1,21 @@
 package com.researchassistant.ai.service;
 
-import com.researchassistant.paper.entity.Paper;
+import com.researchassistant.common.exception.NotFoundException;
 import com.researchassistant.paper.repository.PaperRepository;
-import com.researchassistant.project.entity.Project;
-import com.researchassistant.project.repository.ProjectRepository;
+import com.researchassistant.project.service.ProjectAccessService;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AiAccessService {
 
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
     private final PaperRepository paperRepository;
 
     public AiAccessService(
-            ProjectRepository projectRepository,
+            ProjectAccessService projectAccessService,
             PaperRepository paperRepository) {
 
-        this.projectRepository = projectRepository;
+        this.projectAccessService = projectAccessService;
         this.paperRepository = paperRepository;
     }
 
@@ -25,29 +24,18 @@ public class AiAccessService {
             String documentId,
             String email) {
 
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() ->
-                        new RuntimeException("Project not found"));
-
-        // Check project ownership
-        if (!project.getOwner().getEmail().equals(email)) {
-            throw new RuntimeException(
-                    "You are not authorized to access this project");
-        }
+        // Project exists and belongs to the user (404 / 403)
+        projectAccessService.getOwnedProject(projectId, email);
 
         // If a specific paper is selected,
-        // check that it exists and belongs to this project
+        // check that it exists in this project
         if (documentId != null && !documentId.isBlank()) {
 
-            Paper paper = paperRepository
-                    .findByDocumentId(documentId)
+            paperRepository
+                    .findByDocumentIdAndProjectId(documentId, projectId)
                     .orElseThrow(() ->
-                            new RuntimeException("Paper not found"));
-
-            if (!paper.getProject().getId().equals(projectId)) {
-                throw new RuntimeException(
-                        "This paper does not belong to the selected project");
-            }
+                            new NotFoundException(
+                                    "Paper not found in this project"));
         }
     }
 }

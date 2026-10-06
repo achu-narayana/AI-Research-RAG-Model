@@ -9,6 +9,8 @@ import java.util.List;
 public interface ChatMessageRepository
         extends JpaRepository<ChatMessage, Long> {
 
-    List<ChatMessage> findAllByChatOrderByCreatedAtAsc(
+    List<ChatMessage> findAllByChatOrderByIdAsc(
             ProjectChat chat);
+
+    void deleteAllByChat(ProjectChat chat);
 }

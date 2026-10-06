@@ -13,4 +13,8 @@ public interface PaperRepository extends JpaRepository<Paper, Long> {
     List<Paper> findAllByProjectOrderByUploadedAtDesc(Project project);
 
     Optional<Paper> findByDocumentId(String documentId);
+
+    Optional<Paper> findByDocumentIdAndProjectId(
+            String documentId,
+            Long projectId);
 }

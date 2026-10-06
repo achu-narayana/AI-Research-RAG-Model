@@ -1,32 +1,48 @@
 package com.researchassistant.ai.service;
 
+import com.researchassistant.ai.client.AiHttpClient;
+import com.researchassistant.common.exception.AiServiceException;
+import com.researchassistant.common.exception.BadRequestException;
+
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import tools.jackson.databind.JsonNode;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 public class CompareService {
 
-    private final HttpClient httpClient;
+    private final AiHttpClient aiHttpClient;
     private final AiAccessService aiAccessService;
 
-    public CompareService(AiAccessService aiAccessService) {
+    public CompareService(
+            AiHttpClient aiHttpClient,
+            AiAccessService aiAccessService) {
 
-        this.httpClient = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
-
+        this.aiHttpClient = aiHttpClient;
         this.aiAccessService = aiAccessService;
     }
 
-    public String comparePapers(
+    /**
+     * Returns the Python service's JSON response unchanged.
+     */
+    public JsonNode comparePapers(
             Long projectId,
             String documentId1,
             String documentId2,
             String email) {
+
+        // ----------------------------------------------
+        // Check that two different papers were selected
+        // ----------------------------------------------
+
+        if (documentId1.equals(documentId2)) {
+            throw new BadRequestException(
+                    "Please select two different research papers"
+            );
+        }
 
         // ----------------------------------------------
         // Validate access to both papers
@@ -45,124 +61,22 @@ public class CompareService {
         );
 
         // ----------------------------------------------
-        // Check that two different papers were selected
+        // Build request and call Python
         // ----------------------------------------------
 
-        if (documentId1.equals(documentId2)) {
-            throw new RuntimeException(
-                    "Please select two different research papers"
-            );
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("project_id", projectId);
+        body.put("document_id_1", documentId1);
+        body.put("document_id_2", documentId2);
+
+        JsonNode response =
+                aiHttpClient.postJson("/api/ai/compare", body);
+
+        if (response == null) {
+            throw new AiServiceException(
+                    "AI service returned an empty comparison response");
         }
 
-        try {
-
-            // ------------------------------------------
-            // Build JSON request
-            // ------------------------------------------
-
-            StringBuilder json = new StringBuilder();
-
-            json.append("{")
-                    .append("\"project_id\":")
-                    .append(projectId)
-                    .append(",")
-                    .append("\"document_id_1\":\"")
-                    .append(escapeJson(documentId1))
-                    .append("\"")
-                    .append(",")
-                    .append("\"document_id_2\":\"")
-                    .append(escapeJson(documentId2))
-                    .append("\"")
-                    .append("}");
-
-            String jsonBody = json.toString();
-
-            System.out.println("========================================");
-            System.out.println("Sending comparison request to Python");
-            System.out.println("JSON body: " + jsonBody);
-            System.out.println("========================================");
-
-            // ------------------------------------------
-            // Send request to FastAPI
-            // ------------------------------------------
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(
-                            "http://127.0.0.1:8000/api/ai/compare"
-                    ))
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .header(
-                            "Content-Type",
-                            "application/json"
-                    )
-                    .header(
-                            "Accept",
-                            "application/json"
-                    )
-                    .POST(
-                            HttpRequest.BodyPublishers
-                                    .ofString(jsonBody)
-                    )
-                    .build();
-
-            // ------------------------------------------
-            // Get response
-            // ------------------------------------------
-
-            HttpResponse<String> response =
-                    httpClient.send(
-                            request,
-                            HttpResponse.BodyHandlers.ofString()
-                    );
-
-            System.out.println(
-                    "Python comparison status: "
-                            + response.statusCode()
-            );
-
-            System.out.println(
-                    "Python comparison response: "
-                            + response.body()
-            );
-
-            // ------------------------------------------
-            // Check response
-            // ------------------------------------------
-
-            if (response.statusCode() != 200) {
-
-                throw new RuntimeException(
-                        "Python AI comparison failed. Status: "
-                                + response.statusCode()
-                                + " Response: "
-                                + response.body()
-                );
-            }
-
-            return response.body();
-
-        } catch (Exception e) {
-
-            e.printStackTrace();
-
-            throw new RuntimeException(
-                    "Failed to communicate with AI comparison service",
-                    e
-            );
-        }
-    }
-
-    // ----------------------------------------------
-    // JSON escaping
-    // ----------------------------------------------
-
-    private String escapeJson(String value) {
-
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\\n")
-                .replace("\r", "\\\r")
-                .replace("\t", "\\\t");
+        return response;
     }
 }

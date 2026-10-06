@@ -11,10 +11,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.List;
-import org.springframework.web.multipart.MultipartFile;
+
 @RestController
 @RequestMapping("/api/projects")
 public class PaperController {
@@ -32,8 +30,7 @@ public class PaperController {
     public ResponseEntity<PaperResponse> uploadPaper(
             @PathVariable Long projectId,
             @RequestParam("file") MultipartFile file,
-            Authentication authentication)
-            throws IOException {
+            Authentication authentication) {
 
         String email = authentication.getName();
 
@@ -48,12 +45,18 @@ public class PaperController {
                 .status(HttpStatus.CREATED)
                 .body(response);
     }
-    
+
+    /**
+     * Bulk upload. Returns 200 with all papers when everything
+     * succeeds. If some files fail, the successful ones are kept and
+     * a 502 {"message": "Uploaded X of Y papers. Failed: ..."} is
+     * returned.
+     */
     @PostMapping("/multiple")
-    public ResponseEntity<?> uploadMultiplePapers(
+    public ResponseEntity<List<PaperResponse>> uploadMultiplePapers(
             @RequestParam("files") List<MultipartFile> files,
             @RequestParam("projectId") Long projectId,
-            Authentication authentication) throws IOException {
+            Authentication authentication) {
 
         String email = authentication.getName();
 
@@ -80,5 +83,22 @@ public class PaperController {
                         email
                 )
         );
+    }
+
+    @DeleteMapping("/{projectId}/papers/{documentId}")
+    public ResponseEntity<Void> deletePaper(
+            @PathVariable Long projectId,
+            @PathVariable String documentId,
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        paperService.deletePaper(
+                projectId,
+                documentId,
+                email
+        );
+
+        return ResponseEntity.noContent().build();
     }
 }

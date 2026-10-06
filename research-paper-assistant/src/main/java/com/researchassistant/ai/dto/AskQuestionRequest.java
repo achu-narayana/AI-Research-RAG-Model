@@ -2,10 +2,12 @@ package com.researchassistant.ai.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 public class AskQuestionRequest {
 
     @NotBlank(message = "Question is required")
+    @Size(max = 4000, message = "Question cannot exceed 4000 characters")
     private String question;
 
     @NotNull(message = "Project ID is required")

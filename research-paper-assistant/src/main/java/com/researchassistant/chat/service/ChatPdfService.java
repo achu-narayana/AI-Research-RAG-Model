@@ -11,50 +11,59 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.researchassistant.chat.entity.ChatMessage;
+import com.researchassistant.chat.entity.ProjectChat;
 import com.researchassistant.chat.repository.ChatMessageRepository;
 import com.researchassistant.chat.repository.ProjectChatRepository;
+import com.researchassistant.common.exception.NotFoundException;
 import com.researchassistant.project.entity.Project;
-import com.researchassistant.project.repository.ProjectRepository;
+import com.researchassistant.project.service.ProjectAccessService;
 
 @Service
 public class ChatPdfService {
 
-    private final ProjectRepository projectRepository;
+    private static final float MARGIN = 50;
+    private static final float TOP_Y = 780;
+    private static final float BOTTOM_MARGIN = 60;
+    private static final float LINE_SPACING = 4;
+
+    private static final PDType1Font REGULAR_FONT =
+            new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+    private static final PDType1Font BOLD_FONT =
+            new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+
+    private final ProjectAccessService projectAccessService;
     private final ProjectChatRepository projectChatRepository;
     private final ChatMessageRepository chatMessageRepository;
 
     public ChatPdfService(
-            ProjectRepository projectRepository,
+            ProjectAccessService projectAccessService,
             ProjectChatRepository projectChatRepository,
             ChatMessageRepository chatMessageRepository) {
 
-        this.projectRepository = projectRepository;
+        this.projectAccessService = projectAccessService;
         this.projectChatRepository = projectChatRepository;
         this.chatMessageRepository = chatMessageRepository;
     }
 
+    @Transactional(readOnly = true)
     public byte[] generateChatPdf(Long projectId, String email) {
 
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() ->
-                        new RuntimeException("Project not found"));
+        // Project exists and belongs to the user
+        Project project =
+                projectAccessService.getOwnedProject(projectId, email);
 
-        // Check project ownership
-        if (!project.getOwner().getEmail().equals(email)) {
-            throw new RuntimeException(
-                    "You are not authorized to access this project");
-        }
-
-        var chat = projectChatRepository.findByProject(project)
+        ProjectChat chat = projectChatRepository.findByProject(project)
                 .orElseThrow(() ->
-                        new RuntimeException(
+                        new NotFoundException(
                                 "No chat exists for this project"));
 
         List<ChatMessage> messages =
                 chatMessageRepository
-                        .findAllByChatOrderByCreatedAtAsc(chat);
+                        .findAllByChatOrderByIdAsc(chat);
 
         try (
                 PDDocument document = new PDDocument();
@@ -62,216 +71,70 @@ public class ChatPdfService {
                         new ByteArrayOutputStream()
         ) {
 
-            PDPage page = new PDPage(PDRectangle.A4);
-            document.addPage(page);
+            PdfWriter writer = new PdfWriter(document);
 
-            float margin = 50;
-            float y = 780;
-            float pageWidth = PDRectangle.A4.getWidth();
+            try {
 
-            PDPageContentStream contentStream =
-                    new PDPageContentStream(document, page);
+                // =================================================
+                // TITLE
+                // =================================================
 
-            // =====================================================
-            // TITLE
-            // =====================================================
+                writeWrappedText(writer, "AI Research Paper Assistant", 20, true);
+                writer.space(15);
 
-            contentStream.beginText();
+                // =================================================
+                // PROJECT TITLE
+                // =================================================
 
-            contentStream.setFont(
-                    new PDType1Font(
-                            Standard14Fonts.FontName.HELVETICA_BOLD
-                    ),
-                    20
-            );
+                writeWrappedText(writer, "Project: " + project.getTitle(), 14, true);
+                writer.space(6);
 
-            contentStream.newLineAtOffset(margin, y);
+                writeWrappedText(writer, "Chat History", 10, false);
+                writer.space(20);
 
-            contentStream.showText(
-                    cleanText(
-                            "AI Research Paper Assistant",
-                            true
-                    )
-            );
+                // =================================================
+                // CHAT MESSAGES
+                // =================================================
 
-            contentStream.endText();
+                int questionNumber = 0;
 
-            y -= 35;
+                for (ChatMessage message : messages) {
 
-            // =====================================================
-            // PROJECT TITLE
-            // =====================================================
+                    String type = message.getMessageType() == null
+                            ? ChatMessage.TYPE_CHAT
+                            : message.getMessageType();
 
-            contentStream.beginText();
+                    boolean isUser =
+                            "USER".equalsIgnoreCase(message.getRole());
 
-            contentStream.setFont(
-                    new PDType1Font(
-                            Standard14Fonts.FontName.HELVETICA_BOLD
-                    ),
-                    14
-            );
+                    String heading;
 
-            contentStream.newLineAtOffset(margin, y);
+                    if (ChatMessage.TYPE_SUMMARY.equalsIgnoreCase(type)) {
+                        heading = "Summary";
 
-            contentStream.showText(
-                    "Project: " +
-                    cleanText(
-                            project.getTitle(),
-                            true
-                    )
-            );
+                    } else if (ChatMessage.TYPE_COMPARISON.equalsIgnoreCase(type)) {
+                        heading = "Comparison";
 
-            contentStream.endText();
+                    } else if (isUser) {
+                        questionNumber++;
+                        heading = "Question " + questionNumber;
 
-            y -= 25;
+                    } else {
+                        heading = "Answer " + questionNumber;
+                    }
 
-            // =====================================================
-            // CHAT HISTORY
-            // =====================================================
+                    // Heading
+                    writeWrappedText(writer, heading, 12, true);
+                    writer.space(5);
 
-            contentStream.beginText();
-
-            contentStream.setFont(
-                    new PDType1Font(
-                            Standard14Fonts.FontName.HELVETICA
-                    ),
-                    10
-            );
-
-            contentStream.newLineAtOffset(margin, y);
-
-            contentStream.showText(
-                    cleanText(
-                            "Chat History",
-                            false
-                    )
-            );
-
-            contentStream.endText();
-
-            y -= 30;
-
-            int questionNumber = 0;
-
-            // =====================================================
-            // CHAT MESSAGES
-            // =====================================================
-
-            for (ChatMessage message : messages) {
-
-                String role = message.getRole();
-
-                if ("USER".equalsIgnoreCase(role)) {
-
-                    questionNumber++;
-
-                    // -------------------------------------------------
-                    // QUESTION HEADING
-                    // -------------------------------------------------
-
-                    y = writeWrappedText(
-                            contentStream,
-                            cleanText(
-                                    "Question " + questionNumber,
-                                    true
-                            ),
-                            margin,
-                            y,
-                            pageWidth - (2 * margin),
-                            12,
-                            true
-                    );
-
-                    y -= 5;
-
-                    // -------------------------------------------------
-                    // QUESTION TEXT
-                    // -------------------------------------------------
-
-                    String questionText =
-                            cleanText(
-                                    message.getContent(),
-                                    false
-                            );
-
-                    y = writeWrappedText(
-                            contentStream,
-                            questionText,
-                            margin,
-                            y,
-                            pageWidth - (2 * margin),
-                            11,
-                            false
-                    );
-
-                    y -= 15;
-
-                } else if ("ASSISTANT".equalsIgnoreCase(role)) {
-
-                    // -------------------------------------------------
-                    // ANSWER HEADING
-                    // -------------------------------------------------
-
-                    y = writeWrappedText(
-                            contentStream,
-                            cleanText(
-                                    "Answer " + questionNumber,
-                                    true
-                            ),
-                            margin,
-                            y,
-                            pageWidth - (2 * margin),
-                            12,
-                            true
-                    );
-
-                    y -= 5;
-
-                    // -------------------------------------------------
-                    // ANSWER TEXT
-                    // -------------------------------------------------
-
-                    String answerText =
-                            cleanText(
-                                    message.getContent(),
-                                    false
-                            );
-
-                    y = writeWrappedText(
-                            contentStream,
-                            answerText,
-                            margin,
-                            y,
-                            pageWidth - (2 * margin),
-                            11,
-                            false
-                    );
-
-                    y -= 25;
+                    // Body
+                    writeWrappedText(writer, message.getContent(), 11, false);
+                    writer.space(isUser ? 15 : 25);
                 }
 
-                // =====================================================
-                // CREATE NEW PAGE WHEN NEEDED
-                // =====================================================
-
-                if (y < 70) {
-
-                    contentStream.close();
-
-                    page = new PDPage(PDRectangle.A4);
-                    document.addPage(page);
-
-                    contentStream =
-                            new PDPageContentStream(
-                                    document,
-                                    page
-                            );
-
-                    y = 780;
-                }
+            } finally {
+                writer.close();
             }
-
-            contentStream.close();
 
             document.save(outputStream);
 
@@ -279,7 +142,7 @@ public class ChatPdfService {
 
         } catch (IOException e) {
 
-            throw new RuntimeException(
+            throw new IllegalStateException(
                     "Failed to generate chat PDF",
                     e
             );
@@ -287,102 +150,190 @@ public class ChatPdfService {
     }
 
     // =============================================================
+    // PAGE-AWARE WRITER
+    // =============================================================
+
+    /**
+     * Keeps track of the current page, content stream and y
+     * position, and starts a new page when a line would fall
+     * below the bottom margin.
+     */
+    private static final class PdfWriter {
+
+        private final PDDocument document;
+        private PDPageContentStream contentStream;
+        private float y;
+
+        PdfWriter(PDDocument document) throws IOException {
+            this.document = document;
+            newPage();
+        }
+
+        float maxWidth() {
+            return PDRectangle.A4.getWidth() - (2 * MARGIN);
+        }
+
+        void newPage() throws IOException {
+
+            if (contentStream != null) {
+                contentStream.close();
+            }
+
+            PDPage page = new PDPage(PDRectangle.A4);
+            document.addPage(page);
+
+            contentStream = new PDPageContentStream(document, page);
+            y = TOP_Y;
+        }
+
+        void writeLine(
+                String text,
+                PDType1Font font,
+                float fontSize) throws IOException {
+
+            if (y < BOTTOM_MARGIN) {
+                newPage();
+            }
+
+            if (!text.isEmpty()) {
+                contentStream.beginText();
+                contentStream.setFont(font, fontSize);
+                contentStream.newLineAtOffset(MARGIN, y);
+                contentStream.showText(text);
+                contentStream.endText();
+            }
+
+            y -= fontSize + LINE_SPACING;
+        }
+
+        void space(float amount) {
+            y -= amount;
+        }
+
+        void close() throws IOException {
+            if (contentStream != null) {
+                contentStream.close();
+                contentStream = null;
+            }
+        }
+    }
+
+    // =============================================================
     // WRITE WRAPPED TEXT
     // =============================================================
 
-    private float writeWrappedText(
-            PDPageContentStream contentStream,
+    private void writeWrappedText(
+            PdfWriter writer,
             String text,
-            float x,
-            float y,
-            float maxWidth,
             float fontSize,
             boolean bold
     ) throws IOException {
 
+        if (text == null) {
+            return;
+        }
+
         PDType1Font font = getFont(bold);
+        float maxWidth = writer.maxWidth();
 
-        contentStream.setFont(
-                font,
-                fontSize
-        );
+        // Split on newlines BEFORE cleaning so paragraphs survive
+        String[] rawLines = text.split("\\r?\\n", -1);
 
-        String[] paragraphs =
-                text.split("\\n");
+        for (String rawLine : rawLines) {
 
-        for (String paragraph : paragraphs) {
+            String line =
+                    cleanText(stripMarkdown(rawLine), bold).strip();
 
-            String[] words =
-                    paragraph.split(" ");
+            if (line.isEmpty()) {
+                // Blank line = paragraph gap
+                writer.space(fontSize / 2);
+                continue;
+            }
 
-            StringBuilder line =
-                    new StringBuilder();
+            StringBuilder current = new StringBuilder();
 
-            for (String word : words) {
+            for (String word : line.split(" +")) {
 
-                String testLine =
-                        line.length() == 0
-                                ? word
-                                : line + " " + word;
+                if (word.isEmpty()) {
+                    continue;
+                }
 
-                float textWidth =
-                        font.getStringWidth(testLine)
-                                / 1000
-                                * fontSize;
+                // Hard-break words wider than the whole line
+                if (textWidth(font, word, fontSize) > maxWidth) {
 
-                if (textWidth > maxWidth) {
-
-                    // Prevent trying to print an empty line
-                    if (line.length() > 0) {
-
-                        contentStream.beginText();
-
-                        contentStream.newLineAtOffset(
-                                x,
-                                y
-                        );
-
-                        contentStream.showText(
-                                line.toString()
-                        );
-
-                        contentStream.endText();
-
-                        y -= fontSize + 4;
+                    if (current.length() > 0) {
+                        writer.writeLine(current.toString(), font, fontSize);
+                        current.setLength(0);
                     }
 
-                    line =
-                            new StringBuilder(word);
+                    StringBuilder chunk = new StringBuilder();
+
+                    for (int i = 0; i < word.length(); ) {
+
+                        int codePoint = word.codePointAt(i);
+                        String character = new String(Character.toChars(codePoint));
+
+                        if (chunk.length() > 0 &&
+                                textWidth(font, chunk + character, fontSize) > maxWidth) {
+
+                            writer.writeLine(chunk.toString(), font, fontSize);
+                            chunk.setLength(0);
+                        }
+
+                        chunk.append(character);
+                        i += Character.charCount(codePoint);
+                    }
+
+                    current.append(chunk);
+                    continue;
+                }
+
+                String testLine =
+                        current.length() == 0
+                                ? word
+                                : current + " " + word;
+
+                if (textWidth(font, testLine, fontSize) > maxWidth) {
+
+                    writer.writeLine(current.toString(), font, fontSize);
+                    current = new StringBuilder(word);
 
                 } else {
 
-                    line =
-                            new StringBuilder(testLine);
+                    current = new StringBuilder(testLine);
                 }
             }
 
-            if (line.length() > 0) {
-
-                contentStream.beginText();
-
-                contentStream.newLineAtOffset(
-                        x,
-                        y
-                );
-
-                contentStream.showText(
-                        line.toString()
-                );
-
-                contentStream.endText();
-
-                y -= fontSize + 4;
+            if (current.length() > 0) {
+                writer.writeLine(current.toString(), font, fontSize);
             }
 
-            y -= 3;
+            writer.space(3);
         }
+    }
 
-        return y;
+    private float textWidth(
+            PDType1Font font,
+            String text,
+            float fontSize) throws IOException {
+
+        return font.getStringWidth(text) / 1000 * fontSize;
+    }
+
+    // =============================================================
+    // STRIP SIMPLE MARKDOWN
+    // =============================================================
+
+    private String stripMarkdown(String line) {
+
+        return line
+                // Leading heading markers: "## Title" -> "Title"
+                .replaceFirst("^\\s*#{1,6}\\s*", "")
+                // Bullet "* item" -> "- item"
+                .replaceFirst("^(\\s*)\\*\\s+", "$1- ")
+                .replace("**", "")
+                .replace("__", "")
+                .replace("`", "");
     }
 
     // =============================================================
@@ -391,17 +342,18 @@ public class ChatPdfService {
 
     private PDType1Font getFont(boolean bold) {
 
-        return new PDType1Font(
-                bold
-                        ? Standard14Fonts.FontName.HELVETICA_BOLD
-                        : Standard14Fonts.FontName.HELVETICA
-        );
+        return bold ? BOLD_FONT : REGULAR_FONT;
     }
 
     // =============================================================
     // CLEAN UNSUPPORTED CHARACTERS
     // =============================================================
 
+    /**
+     * Replaces every code point Helvetica cannot encode (including
+     * control characters such as tabs) with a space. Must be called
+     * on single lines: newlines are not preserved.
+     */
     private String cleanText(
             String text,
             boolean bold
@@ -416,20 +368,6 @@ public class ChatPdfService {
 
         StringBuilder cleaned =
                 new StringBuilder();
-
-        /*
-         * Check every Unicode code point individually.
-         *
-         * If Helvetica supports the character:
-         *      keep it.
-         *
-         * If Helvetica does not support it:
-         *      replace it with a space.
-         *
-         * This means we do NOT need to maintain
-         * a list of problematic characters such as
-         * τ, λ, √, —, ₹, etc.
-         */
 
         for (int i = 0; i < text.length();) {
 

@@ -1,5 +1,6 @@
 package com.researchassistant.chat.service;
 
+import com.researchassistant.ai.service.AiAccessService;
 import com.researchassistant.ai.service.AiService;
 import com.researchassistant.chat.dto.ChatMessageRequest;
 import com.researchassistant.chat.entity.ChatMessage;
@@ -7,10 +8,12 @@ import com.researchassistant.chat.entity.ProjectChat;
 import com.researchassistant.chat.repository.ChatMessageRepository;
 import com.researchassistant.chat.repository.ProjectChatRepository;
 import com.researchassistant.project.entity.Project;
-import com.researchassistant.project.repository.ProjectRepository;
+import com.researchassistant.project.service.ProjectAccessService;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -18,42 +21,27 @@ import java.util.List;
 @Service
 public class ChatService {
 
-    private final ProjectRepository projectRepository;
+    private final ProjectAccessService projectAccessService;
     private final ProjectChatRepository projectChatRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final AiService aiService;
+    private final AiAccessService aiAccessService;
+    private final TransactionTemplate transactionTemplate;
 
     public ChatService(
-            ProjectRepository projectRepository,
+            ProjectAccessService projectAccessService,
             ProjectChatRepository projectChatRepository,
             ChatMessageRepository chatMessageRepository,
-            AiService aiService) {
+            AiService aiService,
+            AiAccessService aiAccessService,
+            PlatformTransactionManager transactionManager) {
 
-        this.projectRepository = projectRepository;
+        this.projectAccessService = projectAccessService;
         this.projectChatRepository = projectChatRepository;
         this.chatMessageRepository = chatMessageRepository;
         this.aiService = aiService;
-    }
-
-    // ==================================================
-    // VALIDATE PROJECT ACCESS
-    // ==================================================
-
-    private Project validateProject(
-            Long projectId,
-            String email) {
-
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() ->
-                        new RuntimeException("Project not found"));
-
-        if (!project.getOwner().getEmail().equals(email)) {
-
-            throw new RuntimeException(
-                    "You are not authorized to access this project");
-        }
-
-        return project;
+        this.aiAccessService = aiAccessService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     // ==================================================
@@ -79,55 +67,75 @@ public class ChatService {
     // NORMAL CHAT MESSAGE
     // ==================================================
 
-    @Transactional
+    /**
+     * Not transactional on purpose: the AI call can take minutes,
+     * so the user message and the answer are saved in two short
+     * transactions around it.
+     */
     public ChatMessage sendMessage(
             Long projectId,
             ChatMessageRequest request,
             String email) {
 
-        Project project =
-                validateProject(projectId, email);
-
-        ProjectChat chat =
-                getOrCreateChat(project);
-
         String documentId =
-                request.getDocumentId();
+                request.getDocumentId() == null ||
+                        request.getDocumentId().isBlank()
+                        ? null
+                        : request.getDocumentId();
+
+        // Fail fast (404/403) before anything is saved
+        aiAccessService.validateAccess(projectId, documentId, email);
 
         // ----------------------------------------------
-        // Save user message
+        // 1. Save user message (tx)
         // ----------------------------------------------
 
-        ChatMessage userMessage =
-                new ChatMessage(
-                        chat,
-                        "USER",
-                        request.getMessage(),
-                        documentId,
-                        LocalDateTime.now()
-                );
+        ChatMessage userMessage = transactionTemplate.execute(status -> {
 
-        chatMessageRepository.save(userMessage);
+            Project project =
+                    projectAccessService.getOwnedProject(projectId, email);
 
-        // ----------------------------------------------
-        // Ask AI
-        // ----------------------------------------------
+            ProjectChat chat =
+                    getOrCreateChat(project);
 
-        String answer =
-                aiService.askQuestion(
-                        request.getMessage(),
-                        projectId,
-                        documentId,
-                        email
-                );
+            return chatMessageRepository.save(
+                    new ChatMessage(
+                            chat,
+                            "USER",
+                            request.getMessage(),
+                            documentId,
+                            LocalDateTime.now()
+                    )
+            );
+        });
 
         // ----------------------------------------------
-        // Save AI response
+        // 2. Ask AI (no tx)
+        // ----------------------------------------------
+
+        String answer;
+
+        try {
+            answer = aiService.askQuestion(
+                    request.getMessage(),
+                    projectId,
+                    documentId,
+                    email
+            );
+
+        } catch (RuntimeException e) {
+            // Don't leave an unanswered question in the history
+            chatMessageRepository.deleteById(userMessage.getId());
+            throw e;
+        }
+
+        // ----------------------------------------------
+        // 3. Save AI response (tx)
         // ----------------------------------------------
 
         ChatMessage assistantMessage =
                 new ChatMessage(
-                        chat,
+                        userMessage.getChat(),
                         "ASSISTANT",
                         answer,
                         documentId,
@@ -151,7 +159,7 @@ public class ChatService {
             String email) {
 
         Project project =
-                validateProject(projectId, email);
+                projectAccessService.getOwnedProject(projectId, email);
 
         ProjectChat chat =
                 getOrCreateChat(project);
@@ -161,7 +169,11 @@ public class ChatService {
                         chat,
                         "ASSISTANT",
                         summary,
-                        documentId,
+                        documentId == null || documentId.isBlank()
+                                ? null
+                                : documentId,
+                        null,
+                        ChatMessage.TYPE_SUMMARY,
                         LocalDateTime.now()
                 );
 
@@ -184,26 +196,20 @@ public class ChatService {
 
         // Validate project access
         Project project =
-                validateProject(projectId, email);
+                projectAccessService.getOwnedProject(projectId, email);
 
         // Get existing chat or create one
         ProjectChat chat =
                 getOrCreateChat(project);
-
-        /*
-         * A comparison belongs to TWO papers.
-         *
-         * ChatMessage currently has only one documentId,
-         * so we intentionally save null here instead of
-         * pretending the comparison belongs to one paper.
-         */
 
         ChatMessage comparisonMessage =
                 new ChatMessage(
                         chat,
                         "ASSISTANT",
                         comparison,
-                        null,
+                        documentId1,
+                        documentId2,
+                        ChatMessage.TYPE_COMPARISON,
                         LocalDateTime.now()
                 );
 
@@ -216,12 +222,13 @@ public class ChatService {
     // GET CHAT HISTORY
     // ==================================================
 
+    @Transactional(readOnly = true)
     public List<ChatMessage> getChatHistory(
             Long projectId,
             String email) {
 
         Project project =
-                validateProject(projectId, email);
+                projectAccessService.getOwnedProject(projectId, email);
 
         ProjectChat chat =
                 projectChatRepository
@@ -233,6 +240,6 @@ public class ChatService {
         }
 
         return chatMessageRepository
-                .findAllByChatOrderByCreatedAtAsc(chat);
+                .findAllByChatOrderByIdAsc(chat);
     }
 }

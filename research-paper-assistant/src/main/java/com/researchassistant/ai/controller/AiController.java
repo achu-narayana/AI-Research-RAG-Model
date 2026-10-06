@@ -90,14 +90,14 @@ public class AiController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
-    public ResponseEntity<?> summarize(
+    public ResponseEntity<JsonNode> summarize(
             @Valid @RequestBody SummaryRequest request,
             Authentication authentication) {
 
         String email = authentication.getName();
 
         // Generate summary using Python AI service
-        String result =
+        JsonNode result =
                 summaryService.generateSummary(
                         request.getProjectId(),
                         request.getDocumentId(),
@@ -106,11 +106,10 @@ public class AiController {
 
         // Extract actual summary text
         String summaryText =
-                extractSummaryText(result);
+                extractText(result, "summary");
 
         // Save summary into chat history
-        if (summaryText != null &&
-                !summaryText.isBlank()) {
+        if (!summaryText.isBlank()) {
 
             chatService.saveSummaryMessage(
                     request.getProjectId(),
@@ -121,10 +120,7 @@ public class AiController {
         }
 
         // Return original Python response
-        return ResponseEntity
-                .ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(result);
+        return ResponseEntity.ok(result);
     }
 
     // =========================================================
@@ -136,7 +132,7 @@ public class AiController {
             consumes = MediaType.APPLICATION_JSON_VALUE,
             produces = MediaType.APPLICATION_JSON_VALUE
     )
-    public ResponseEntity<?> comparePapers(
+    public ResponseEntity<JsonNode> comparePapers(
             @Valid @RequestBody CompareRequest request,
             Authentication authentication) {
 
@@ -146,7 +142,7 @@ public class AiController {
         // Generate comparison using Python
         // ----------------------------------------------
 
-        String result =
+        JsonNode result =
                 compareService.comparePapers(
                         request.getProjectId(),
                         request.getDocumentId1(),
@@ -159,14 +155,13 @@ public class AiController {
         // ----------------------------------------------
 
         String comparisonText =
-                extractComparisonText(result);
+                extractText(result, "comparison");
 
         // ----------------------------------------------
         // Save comparison into chat history
         // ----------------------------------------------
 
-        if (comparisonText != null &&
-                !comparisonText.isBlank()) {
+        if (!comparisonText.isBlank()) {
 
             chatService.saveComparisonMessage(
                     request.getProjectId(),
@@ -181,119 +176,36 @@ public class AiController {
         // Return original Python response
         // ----------------------------------------------
 
-        return ResponseEntity
-                .ok()
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(result);
+        return ResponseEntity.ok(result);
     }
 
     // =========================================================
-    // EXTRACT SUMMARY TEXT
+    // EXTRACT TEXT FIELD FROM PYTHON RESPONSE
     // =========================================================
 
-    private String extractSummaryText(String result) {
+    private String extractText(JsonNode node, String field) {
 
-        if (result == null ||
-                result.isBlank()) {
-
+        if (node == null || node.isNull()) {
             return "";
         }
 
-        try {
+        // Handle a JSON string that itself contains JSON
+        if (node.isString()) {
+            try {
+                node = jsonMapper.readTree(node.asString());
 
-            JsonNode node =
-                    jsonMapper.readTree(result);
-
-            // Handle JSON string containing JSON
-            if (node.isTextual()) {
-
-                node =
-                        jsonMapper.readTree(
-                                node.asString()
-                        );
+            } catch (RuntimeException e) {
+                return node.asString().trim();
             }
-
-            // Normal summary response
-            if (node.has("summary") &&
-                    !node.get("summary").isNull()) {
-
-                return node
-                        .get("summary")
-                        .asString()
-                        .trim();
-            }
-
-            // Fallback
-            if (node.has("message") &&
-                    !node.get("message").isNull()) {
-
-                return node
-                        .get("message")
-                        .asString()
-                        .trim();
-            }
-
-        } catch (Exception e) {
-
-            // If response isn't JSON,
-            // save the raw response.
-            return result.trim();
         }
 
-        return "";
-    }
-
-    // =========================================================
-    // EXTRACT COMPARISON TEXT
-    // =========================================================
-
-    private String extractComparisonText(String result) {
-
-        if (result == null ||
-                result.isBlank()) {
-
-            return "";
+        if (node.hasNonNull(field)) {
+            return node.get(field).asString().trim();
         }
 
-        try {
-
-            JsonNode node =
-                    jsonMapper.readTree(result);
-
-            // Handle JSON string containing JSON
-            if (node.isTextual()) {
-
-                node =
-                        jsonMapper.readTree(
-                                node.asString()
-                        );
-            }
-
-            // Normal comparison response
-            if (node.has("comparison") &&
-                    !node.get("comparison").isNull()) {
-
-                return node
-                        .get("comparison")
-                        .asString()
-                        .trim();
-            }
-
-            // Fallback
-            if (node.has("message") &&
-                    !node.get("message").isNull()) {
-
-                return node
-                        .get("message")
-                        .asString()
-                        .trim();
-            }
-
-        } catch (Exception e) {
-
-            // If response isn't JSON,
-            // save the raw response.
-            return result.trim();
+        // Fallback
+        if (node.hasNonNull("message")) {
+            return node.get("message").asString().trim();
         }
 
         return "";
