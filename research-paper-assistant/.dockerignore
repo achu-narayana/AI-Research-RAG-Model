@@ -1,0 +1,17 @@
+# Build output
+target/
+
+# Local runtime data (H2 database, uploaded PDFs)
+data/
+uploads/
+
+# IDE / OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
